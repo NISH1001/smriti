@@ -5,17 +5,33 @@ plugins {
 }
 
 android {
-    namespace = "com.nishparadox.shruti"
+    namespace = "com.nishparadox.smriti"
     compileSdk = 35
+    ndkVersion = "27.1.12297006"
 
     defaultConfig {
-        applicationId = "com.nishparadox.shruti"
+        applicationId = "com.nishparadox.smriti"
         minSdk = 34
         targetSdk = 35
         versionCode = 1
         versionName = "0.1"
         ndk { abiFilters.add("arm64-v8a") }
+        externalNativeBuild {
+            cmake { arguments += listOf("-DGGML_OPENMP=OFF") }
+        }
     }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
+    androidResources {
+        noCompress.add("bin")
+    }
+
     buildTypes {
         debug { isMinifyEnabled = false }
     }

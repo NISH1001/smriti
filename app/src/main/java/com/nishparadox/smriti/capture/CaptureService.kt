@@ -1,0 +1,167 @@
+package com.nishparadox.smriti.capture
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.Service
+import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioPlaybackCaptureConfiguration
+import android.media.AudioRecord
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
+import android.util.Log
+import androidx.core.app.NotificationCompat
+import com.nishparadox.smriti.output.NotificationOutput
+import com.nishparadox.smriti.transcribe.WhisperTranscriber
+import com.nishparadox.smriti.trigger.SnipEntryPoint
+import java.io.File
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.concurrent.thread
+
+/**
+ * Foreground service: captures playback audio from whitelisted app UIDs into a
+ * rolling [RingBuffer]; on [requestSnip] assembles a [-N, +(K-N)] clip, saves a WAV,
+ * transcribes it on-device, and posts the transcript as a notification.
+ */
+class CaptureService : Service(), SnipEntryPoint {
+    companion object {
+        @Volatile var instance: CaptureService? = null
+        const val MODEL_ASSET = "models/ggml-tiny.en-q5_1.bin"
+        const val TAG = "SMRITI"
+    }
+
+    private val sr = 16000
+    private var preRoll = 5
+    private var total = 20
+    private lateinit var ring: RingBuffer
+    private var record: AudioRecord? = null
+    private var projection: MediaProjection? = null
+    private val running = AtomicBoolean(false)
+    @Volatile private var snip: SnipController? = null
+
+    private val transcribeExecutor = Executors.newSingleThreadExecutor()
+    @Volatile private var transcriber: WhisperTranscriber? = null
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onStartCommand(intent: Intent, flags: Int, startId: Int): Int {
+        preRoll = intent.getIntExtra("preRoll", 5)
+        total = intent.getIntExtra("total", 20)
+        val uids = intent.getIntArrayExtra("uids") ?: intArrayOf()
+        ring = RingBuffer(sr * preRoll)
+
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(
+            NotificationChannel("cap", "Capture", NotificationManager.IMPORTANCE_LOW)
+        )
+        startForeground(
+            1,
+            NotificationCompat.Builder(this, "cap")
+                .setContentTitle("Smriti listening")
+                .setContentText("Tap the स्म bubble to snip")
+                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .build()
+        )
+
+        val mpm = getSystemService(MediaProjectionManager::class.java)
+        val code = intent.getIntExtra("code", 0)
+        @Suppress("DEPRECATION")
+        val data = intent.getParcelableExtra<Intent>("data")
+        if (data == null) { stopSelf(); return START_NOT_STICKY }
+        projection = mpm.getMediaProjection(code, data).apply {
+            registerCallback(object : MediaProjection.Callback() {
+                override fun onStop() { running.set(false); stopSelf() }
+            }, Handler(Looper.getMainLooper()))
+        }
+
+        val cb = AudioPlaybackCaptureConfiguration.Builder(projection!!)
+            .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+            .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
+        for (u in uids) cb.addMatchingUid(u)
+
+        val fmt = AudioFormat.Builder()
+            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+            .setSampleRate(sr)
+            .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+            .build()
+        val minBuf = AudioRecord.getMinBufferSize(
+            sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
+        )
+        record = AudioRecord.Builder()
+            .setAudioFormat(fmt)
+            .setBufferSizeInBytes(minBuf * 2)
+            .setAudioPlaybackCaptureConfig(cb.build())
+            .build()
+
+        instance = this
+        running.set(true)
+        record!!.startRecording()
+        thread(name = "smriti-capture") {
+            val buf = ShortArray(minBuf)
+            while (running.get()) {
+                val n = record!!.read(buf, 0, buf.size)
+                if (n > 0) {
+                    ring.write(buf, n)
+                    val s = snip
+                    if (s != null && s.feed(buf, n)) {
+                        val clip = s.result(); snip = null
+                        finalizeClip(clip)
+                    }
+                }
+            }
+        }
+        return START_STICKY
+    }
+
+    override fun requestSnip() {
+        if (snip == null) {
+            val sc = SnipController(sr)
+            sc.begin(ring.snapshot(), total)
+            snip = sc
+            Log.i(TAG, "snip started preRoll=$preRoll total=$total")
+        }
+    }
+
+    private fun finalizeClip(clip: ShortArray) {
+        val dir = File(filesDir, "clips").apply { mkdirs() }
+        val wav = File(dir, "${System.nanoTime()}.wav")
+        WavWriter.write(clip, sr, wav)
+        Log.i(TAG, "saved ${wav.name} samples=${clip.size}")
+        val floats = FloatArray(clip.size) { clip[it] / 32768f }
+        transcribeExecutor.execute {
+            val t = ensureTranscriber()
+            val text = if (t != null && t.loaded) t.transcribe(floats) else "(model not loaded)"
+            Log.i(TAG, "transcript: $text")
+            NotificationOutput.showTranscript(this, text)
+        }
+    }
+
+    private fun ensureTranscriber(): WhisperTranscriber? {
+        transcriber?.let { return it }
+        return try {
+            val modelFile = File(filesDir, "ggml-tiny.en-q5_1.bin")
+            if (!modelFile.exists()) {
+                assets.open(MODEL_ASSET).use { input ->
+                    modelFile.outputStream().use { input.copyTo(it) }
+                }
+            }
+            WhisperTranscriber(modelFile.absolutePath).also { transcriber = it }
+        } catch (e: Exception) {
+            Log.e(TAG, "transcriber init failed", e); null
+        }
+    }
+
+    override fun onDestroy() {
+        running.set(false)
+        runCatching { record?.stop(); record?.release() }
+        runCatching { projection?.stop() }
+        transcribeExecutor.shutdown()
+        instance = null
+        super.onDestroy()
+    }
+}
