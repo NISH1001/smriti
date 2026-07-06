@@ -293,8 +293,8 @@ private fun SnipRow(snip: Snip) {
     val badge: String
     val preview: String
     when (snip.status) {
-        SnipStatus.RECORDING -> { badge = "●"; preview = "Recording…" }
-        SnipStatus.TRANSCRIBING -> { badge = "⏳"; preview = "Transcribing…" }
+        SnipStatus.RECORDING -> { badge = "●"; preview = "Recording… (up to ${snip.durationS}s)" }
+        SnipStatus.TRANSCRIBING -> { badge = "⏳"; preview = "Processing · ${snip.durationS}s of audio…" }
         SnipStatus.FAILED -> { badge = "⚠"; preview = snip.text.ifBlank { "Failed" } }
         SnipStatus.DONE -> { badge = "✓"; preview = snip.text.ifBlank { "(no speech detected)" } }
     }
