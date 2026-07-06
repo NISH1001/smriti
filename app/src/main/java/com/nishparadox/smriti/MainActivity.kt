@@ -18,16 +18,21 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -101,9 +106,11 @@ class MainActivity : ComponentActivity() {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     if (screen == "main") {
                         val canOverlay = AndroidSettings.canDrawOverlays(this@MainActivity)
-                        Column(Modifier.fillMaxSize().padding(20.dp)) {
+                        Column(Modifier.fillMaxSize().systemBarsPadding().padding(20.dp)) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                TextButton(onClick = { screen = "settings" }) { Text("⚙  Settings") }
+                                IconButton(onClick = { screen = "settings" }) {
+                                    Icon(Icons.Filled.Settings, contentDescription = "Settings")
+                                }
                             }
                             Column(
                                 Modifier.weight(1f).fillMaxWidth(),
@@ -156,15 +163,15 @@ class MainActivity : ComponentActivity() {
                         }
                     } else {
                         val apps = remember { AppWhitelist.installedLaunchable(this@MainActivity) }
-                        LazyColumn(Modifier.fillMaxSize().padding(16.dp)) {
+                        LazyColumn(Modifier.fillMaxSize().systemBarsPadding().padding(16.dp)) {
                             item {
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    TextButton(onClick = {
+                                    IconButton(onClick = {
                                         settings.preRoll = pre.toInt()
                                         settings.total = tot.toInt()
                                         settings.whitelist = selected.toSet()
                                         screen = "main"
-                                    }) { Text("‹  Back") }
+                                    }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                                     Text("Settings", fontSize = 20.sp)
                                 }
                                 Spacer(Modifier.height(8.dp))
