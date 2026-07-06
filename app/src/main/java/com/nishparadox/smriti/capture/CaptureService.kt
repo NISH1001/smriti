@@ -15,6 +15,9 @@ import android.os.IBinder
 import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.nishparadox.smriti.notes.Snip
+import com.nishparadox.smriti.notes.SnipStatus
+import com.nishparadox.smriti.notes.SnipStore
 import com.nishparadox.smriti.output.NotificationOutput
 import com.nishparadox.smriti.transcribe.WhisperTranscriber
 import com.nishparadox.smriti.trigger.SnipEntryPoint
@@ -27,8 +30,8 @@ import kotlin.concurrent.thread
 /**
  * Foreground service: captures playback audio from whitelisted app UIDs into a
  * rolling [RingBuffer]; [requestSnip] toggles a snip — first tap starts a [-N, +(K-N)]
- * clip, a second tap force-finalizes it early. On finalize it saves a WAV, transcribes
- * on-device, and posts the transcript as a notification.
+ * clip, a second tap force-finalizes it early. Each snip is tracked in [SnipStore]
+ * (Recording -> Transcribing -> Done) and posted as a notification when transcribed.
  */
 class CaptureService : Service(), SnipEntryPoint {
     companion object {
@@ -59,6 +62,7 @@ class CaptureService : Service(), SnipEntryPoint {
         total = intent.getIntExtra("total", 10)
         val uids = intent.getIntArrayExtra("uids") ?: intArrayOf()
         ring = RingBuffer(sr * preRoll)
+        SnipStore.ensureLoaded(this)
 
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(
@@ -115,7 +119,7 @@ class CaptureService : Service(), SnipEntryPoint {
                     val s = snipRef.get()
                     if (s != null && s.feed(buf, n) && snipRef.compareAndSet(s, null)) {
                         notifySnip(false)
-                        finalizeClip(s.result())
+                        finalizeClip(s.result(), s.noteId)
                     }
                 }
             }
@@ -129,13 +133,16 @@ class CaptureService : Service(), SnipEntryPoint {
         if (s == null) {
             val sc = SnipController(sr)
             sc.begin(ring.snapshot(), total)
+            val id = System.currentTimeMillis()
+            sc.noteId = id
             snipRef.set(sc)
+            SnipStore.add(Snip(id = id, createdAt = id, status = SnipStatus.RECORDING, durationS = total))
             notifySnip(true)
             Log.i(TAG, "snip started preRoll=$preRoll total=$total")
         } else if (snipRef.compareAndSet(s, null)) {
             notifySnip(false)
             Log.i(TAG, "snip force-stopped")
-            finalizeClip(s.result())
+            finalizeClip(s.result(), s.noteId)
         }
     }
 
@@ -143,16 +150,22 @@ class CaptureService : Service(), SnipEntryPoint {
         main.post { onSnipState?.invoke(active) }
     }
 
-    private fun finalizeClip(clip: ShortArray) {
+    private fun finalizeClip(clip: ShortArray, noteId: Long) {
         val dir = File(filesDir, "clips").apply { mkdirs() }
         val wav = File(dir, "${System.nanoTime()}.wav")
         WavWriter.write(clip, sr, wav)
+        val durationS = clip.size / sr
         Log.i(TAG, "saved ${wav.name} samples=${clip.size}")
+        SnipStore.update(noteId) { it.copy(status = SnipStatus.TRANSCRIBING, durationS = durationS) }
         val floats = FloatArray(clip.size) { clip[it] / 32768f }
         transcribeExecutor.execute {
             val t = ensureTranscriber()
-            val text = if (t != null && t.loaded) t.transcribe(floats) else "(model not loaded)"
+            val ok = t != null && t.loaded
+            val text = if (ok) t!!.transcribe(floats) else "(model not loaded)"
             Log.i(TAG, "transcript: $text")
+            SnipStore.update(noteId) {
+                it.copy(status = if (ok) SnipStatus.DONE else SnipStatus.FAILED, text = text)
+            }
             NotificationOutput.showTranscript(this, text)
         }
     }

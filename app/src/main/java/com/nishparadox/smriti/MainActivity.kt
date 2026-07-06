@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings as AndroidSettings
+import android.text.format.DateUtils
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
@@ -60,6 +62,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.core.graphics.drawable.toBitmap
 import com.nishparadox.smriti.apps.AppWhitelist
 import com.nishparadox.smriti.capture.CaptureService
+import com.nishparadox.smriti.notes.Snip
+import com.nishparadox.smriti.notes.SnipStatus
+import com.nishparadox.smriti.notes.SnipStore
 import com.nishparadox.smriti.settings.Settings
 import com.nishparadox.smriti.trigger.FloatingBubbleService
 import com.nishparadox.smriti.ui.SmritiTheme
@@ -70,6 +75,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val settings = Settings(this)
         val mpm = getSystemService(MediaProjectionManager::class.java)
+        SnipStore.ensureLoaded(this)
 
         setContent {
             var themeMode by remember { mutableStateOf(ThemeMode.from(settings.themeMode)) }
@@ -129,36 +135,37 @@ class MainActivity : ComponentActivity() {
                                     Icon(Icons.Filled.Settings, contentDescription = "Settings")
                                 }
                             }
+
                             Column(
-                                Modifier.weight(1f).fillMaxWidth(),
-                                verticalArrangement = Arrangement.Center,
+                                Modifier.fillMaxWidth(),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Text("स्मृति", fontSize = 68.sp, color = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.height(8.dp))
+                                Text("स्मृति", fontSize = 44.sp, color = MaterialTheme.colorScheme.primary)
                                 Text(
                                     "smriti · capture what you hear",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
                                 )
-                                Spacer(Modifier.height(40.dp))
+                                Spacer(Modifier.height(16.dp))
                                 Text(
                                     if (running) "● Listening — tap the स्म bubble" else "Idle",
                                     color = MaterialTheme.colorScheme.onBackground
                                 )
-                                Spacer(Modifier.height(16.dp))
+                                Spacer(Modifier.height(12.dp))
                                 if (!running) {
                                     Button(
                                         onClick = { startSession() },
                                         enabled = selected.isNotEmpty() && canOverlay,
-                                        modifier = Modifier.fillMaxWidth(0.75f).height(54.dp)
+                                        modifier = Modifier.fillMaxWidth(0.8f).height(52.dp)
                                     ) { Text("▶  Start listening", fontSize = 18.sp) }
                                 } else {
                                     Button(
                                         onClick = { stopSession() },
-                                        modifier = Modifier.fillMaxWidth(0.75f).height(54.dp)
+                                        modifier = Modifier.fillMaxWidth(0.8f).height(52.dp)
                                     ) { Text("■  Stop", fontSize = 18.sp) }
                                 }
                                 if (!canOverlay) {
-                                    Spacer(Modifier.height(12.dp))
+                                    Spacer(Modifier.height(10.dp))
                                     OutlinedButton(onClick = {
                                         startActivity(
                                             Intent(
@@ -169,12 +176,25 @@ class MainActivity : ComponentActivity() {
                                     }) { Text("Grant 'Draw over other apps'") }
                                 }
                                 if (selected.isEmpty()) {
-                                    Spacer(Modifier.height(8.dp))
+                                    Spacer(Modifier.height(6.dp))
                                     Text(
                                         "Pick an app to watch in Settings",
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        fontSize = 13.sp
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
                                     )
+                                }
+                            }
+
+                            Spacer(Modifier.height(20.dp))
+                            Text("Recent", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.height(4.dp))
+                            if (SnipStore.snips.isEmpty()) {
+                                Text(
+                                    "Your snips will appear here.",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
+                                )
+                            } else {
+                                LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+                                    items(SnipStore.snips) { snip -> SnipRow(snip) }
                                 }
                             }
                         }
@@ -261,6 +281,39 @@ class MainActivity : ComponentActivity() {
 private fun labelOf(ctx: Context, pkg: String): String = runCatching {
     ctx.packageManager.getApplicationLabel(ctx.packageManager.getApplicationInfo(pkg, 0)).toString()
 }.getOrDefault(pkg)
+
+private fun shareText(ctx: Context, text: String) {
+    val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
+    ctx.startActivity(Intent.createChooser(send, "Share snip").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+}
+
+@Composable
+private fun SnipRow(snip: Snip) {
+    val ctx = LocalContext.current
+    val badge: String
+    val preview: String
+    when (snip.status) {
+        SnipStatus.RECORDING -> { badge = "●"; preview = "Recording…" }
+        SnipStatus.TRANSCRIBING -> { badge = "⏳"; preview = "Transcribing…" }
+        SnipStatus.FAILED -> { badge = "⚠"; preview = snip.text.ifBlank { "Failed" } }
+        SnipStatus.DONE -> { badge = "✓"; preview = snip.text.ifBlank { "(no speech detected)" } }
+    }
+    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.Top) {
+        Text(badge, Modifier.padding(end = 10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(preview, maxLines = 4, color = MaterialTheme.colorScheme.onBackground)
+            Text(
+                DateUtils.getRelativeTimeSpanString(snip.createdAt).toString(),
+                fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (snip.status == SnipStatus.DONE && snip.text.isNotBlank()) {
+            IconButton(onClick = { shareText(ctx, snip.text) }) {
+                Icon(Icons.Filled.Share, contentDescription = "Share")
+            }
+        }
+    }
+}
 
 @Composable
 private fun AppIcon(pkg: String, sizeDp: Int) {

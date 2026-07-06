@@ -7,6 +7,8 @@ package com.nishparadox.smriti.capture
  * calls [feed] while the trigger thread may call [result].
  */
 class SnipController(private val sampleRate: Int) {
+    /** Id of the queue note this snip corresponds to (set by the service). */
+    @Volatile var noteId: Long = 0L
     private var target = 0
     private val acc = ArrayList<Short>()
 
