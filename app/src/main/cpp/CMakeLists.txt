@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.22.1)
 project(smriti_whisper CXX C)
 set(CMAKE_CXX_STANDARD 17)
 
+# Align native ELF load segments to 16 KB (Android 15+ / Pixel 16 KB page size).
+# Applies to all targets defined below, including ggml pulled in via FetchContent.
+add_link_options("-Wl,-z,max-page-size=16384")
+
 # Repo root (app/src/main/cpp -> up 4 -> smriti/) holds the vendored whisper.cpp
 set(WHISPER_LIB_DIR ${CMAKE_SOURCE_DIR}/../../../../whisper.cpp)
 
