@@ -17,4 +17,8 @@ class Settings(ctx: Context) {
     var whitelist: Set<String>
         get() = p.getStringSet("wl", setOf("com.audiobookshelf.app"))!!
         set(v) { p.edit().putStringSet("wl", v).apply() }
+
+    var themeMode: String
+        get() = p.getString("theme", "dark")!!
+        set(v) { p.edit().putString("theme", v).apply() }
 }

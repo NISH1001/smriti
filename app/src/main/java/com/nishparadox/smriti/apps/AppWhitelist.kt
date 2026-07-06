@@ -1,25 +1,21 @@
 package com.nishparadox.smriti.apps
 
 import android.content.Context
-import android.content.pm.PackageManager
+import android.content.Intent
 
-/** Known media apps a user may want to snip from, and package -> uid resolution. */
+/** App selection helpers: list launchable apps and resolve package -> uid. */
 object AppWhitelist {
-    /** package name -> display label. Only installed ones are shown in the UI. */
-    val CANDIDATES = linkedMapOf(
-        "com.audiobookshelf.app" to "Audiobookshelf",
-        "com.google.android.apps.youtube.music" to "YouTube Music",
-        "app.revanced.android.apps.youtube.music" to "YT Music (ReVanced)",
-        "com.google.android.youtube" to "YouTube",
-    )
-
-    fun installed(ctx: Context): List<Pair<String, String>> =
-        CANDIDATES.entries.filter { isInstalled(ctx, it.key) }.map { it.key to it.value }
-
     fun uidsFor(ctx: Context, pkgs: Set<String>): IntArray = pkgs.mapNotNull { pkg ->
         runCatching { ctx.packageManager.getPackageUid(pkg, 0) }.getOrNull()
     }.toIntArray()
 
-    private fun isInstalled(ctx: Context, pkg: String): Boolean =
-        runCatching { ctx.packageManager.getPackageInfo(pkg, 0); true }.getOrDefault(false)
+    /** All launchable installed apps (needs QUERY_ALL_PACKAGES; sideload only), sorted by label. */
+    fun installedLaunchable(ctx: Context): List<Pair<String, String>> {
+        val pm = ctx.packageManager
+        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        return pm.queryIntentActivities(intent, 0)
+            .map { it.activityInfo.packageName to it.loadLabel(pm).toString() }
+            .distinctBy { it.first }
+            .sortedBy { it.second.lowercase() }
+    }
 }
