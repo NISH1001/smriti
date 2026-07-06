@@ -1,0 +1,17 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Waveform: five rounded bars, symmetric about center (54,54). "capture what you hear" -->
+    <path android:strokeColor="#DCE7FF" android:strokeWidth="6" android:strokeLineCap="round"
+        android:pathData="M36,44 L36,64" />
+    <path android:strokeColor="#DCE7FF" android:strokeWidth="6" android:strokeLineCap="round"
+        android:pathData="M45,36 L45,72" />
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="6" android:strokeLineCap="round"
+        android:pathData="M54,30 L54,78" />
+    <path android:strokeColor="#DCE7FF" android:strokeWidth="6" android:strokeLineCap="round"
+        android:pathData="M63,38 L63,70" />
+    <path android:strokeColor="#DCE7FF" android:strokeWidth="6" android:strokeLineCap="round"
+        android:pathData="M72,43 L72,65" />
+</vector>

@@ -11,7 +11,7 @@ class Settings(ctx: Context) {
         set(v) { p.edit().putInt("preRoll", v).apply() }
 
     var total: Int
-        get() = p.getInt("total", 20)
+        get() = p.getInt("total", 10)
         set(v) { p.edit().putInt("total", v).apply() }
 
     var whitelist: Set<String>

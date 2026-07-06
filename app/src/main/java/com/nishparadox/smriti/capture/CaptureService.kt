@@ -21,28 +21,33 @@ import com.nishparadox.smriti.trigger.SnipEntryPoint
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 
 /**
  * Foreground service: captures playback audio from whitelisted app UIDs into a
- * rolling [RingBuffer]; on [requestSnip] assembles a [-N, +(K-N)] clip, saves a WAV,
- * transcribes it on-device, and posts the transcript as a notification.
+ * rolling [RingBuffer]; [requestSnip] toggles a snip — first tap starts a [-N, +(K-N)]
+ * clip, a second tap force-finalizes it early. On finalize it saves a WAV, transcribes
+ * on-device, and posts the transcript as a notification.
  */
 class CaptureService : Service(), SnipEntryPoint {
     companion object {
         @Volatile var instance: CaptureService? = null
+        /** Set by the floating bubble to reflect snip state (true = recording). */
+        @Volatile var onSnipState: ((Boolean) -> Unit)? = null
         const val MODEL_ASSET = "models/ggml-tiny.en-q5_1.bin"
         const val TAG = "SMRITI"
     }
 
     private val sr = 16000
     private var preRoll = 5
-    private var total = 20
+    private var total = 10
     private lateinit var ring: RingBuffer
     private var record: AudioRecord? = null
     private var projection: MediaProjection? = null
     private val running = AtomicBoolean(false)
-    @Volatile private var snip: SnipController? = null
+    private val snipRef = AtomicReference<SnipController?>(null)
+    private val main = Handler(Looper.getMainLooper())
 
     private val transcribeExecutor = Executors.newSingleThreadExecutor()
     @Volatile private var transcriber: WhisperTranscriber? = null
@@ -51,7 +56,7 @@ class CaptureService : Service(), SnipEntryPoint {
 
     override fun onStartCommand(intent: Intent, flags: Int, startId: Int): Int {
         preRoll = intent.getIntExtra("preRoll", 5)
-        total = intent.getIntExtra("total", 20)
+        total = intent.getIntExtra("total", 10)
         val uids = intent.getIntArrayExtra("uids") ?: intArrayOf()
         ring = RingBuffer(sr * preRoll)
 
@@ -76,7 +81,7 @@ class CaptureService : Service(), SnipEntryPoint {
         projection = mpm.getMediaProjection(code, data).apply {
             registerCallback(object : MediaProjection.Callback() {
                 override fun onStop() { running.set(false); stopSelf() }
-            }, Handler(Looper.getMainLooper()))
+            }, main)
         }
 
         val cb = AudioPlaybackCaptureConfiguration.Builder(projection!!)
@@ -107,10 +112,10 @@ class CaptureService : Service(), SnipEntryPoint {
                 val n = record!!.read(buf, 0, buf.size)
                 if (n > 0) {
                     ring.write(buf, n)
-                    val s = snip
-                    if (s != null && s.feed(buf, n)) {
-                        val clip = s.result(); snip = null
-                        finalizeClip(clip)
+                    val s = snipRef.get()
+                    if (s != null && s.feed(buf, n) && snipRef.compareAndSet(s, null)) {
+                        notifySnip(false)
+                        finalizeClip(s.result())
                     }
                 }
             }
@@ -118,13 +123,24 @@ class CaptureService : Service(), SnipEntryPoint {
         return START_STICKY
     }
 
+    /** First tap starts a snip; second tap force-finalizes the current one. */
     override fun requestSnip() {
-        if (snip == null) {
+        val s = snipRef.get()
+        if (s == null) {
             val sc = SnipController(sr)
             sc.begin(ring.snapshot(), total)
-            snip = sc
+            snipRef.set(sc)
+            notifySnip(true)
             Log.i(TAG, "snip started preRoll=$preRoll total=$total")
+        } else if (snipRef.compareAndSet(s, null)) {
+            notifySnip(false)
+            Log.i(TAG, "snip force-stopped")
+            finalizeClip(s.result())
         }
+    }
+
+    private fun notifySnip(active: Boolean) {
+        main.post { onSnipState?.invoke(active) }
     }
 
     private fun finalizeClip(clip: ShortArray) {
@@ -158,6 +174,7 @@ class CaptureService : Service(), SnipEntryPoint {
 
     override fun onDestroy() {
         running.set(false)
+        onSnipState = null
         runCatching { record?.stop(); record?.release() }
         runCatching { projection?.stop() }
         transcribeExecutor.shutdown()
