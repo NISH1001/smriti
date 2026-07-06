@@ -17,12 +17,13 @@ While listening to an audiobook/podcast on a walk (headphones, phone pocketed, s
 
 Prove the core loop on the real Pixel before any polish or persistence:
 
-- Start a listening session (MediaProjection consent) → ring buffer holds last **N** seconds.
-- **One tap** to snip. *v0 trigger = a notification "Snip" action button* (zero extra permissions, fastest to validate). Volume-Up long-press is added immediately **after** the core works.
+- **Selected apps only (from v0):** you pick a small whitelist of apps to watch (e.g. Audiobookshelf). Capture is restricted to those apps' UIDs via `AudioPlaybackCaptureConfiguration.addMatchingUid()`, and the snip trigger is only armed when a whitelisted app has an active media session — so no other app can accidentally trigger capture or waste resources.
+- Start a listening session (MediaProjection consent) → ring buffer holds last **N** seconds of the selected app's audio.
+- **One tap** to snip. *v0 trigger = a floating bubble* — a draggable `SYSTEM_ALERT_WINDOW` overlay button (tap anywhere; matches the "floats around" vision; ideal for screen-on validation). Needs "Draw over other apps." **Volume-Up long-press** (eyes-free, screen-off) is added immediately **after** the core works — the bubble does *not* work with the screen off/pocketed, so it's a testing convenience, not the final walking trigger.
 - Snip captures **total K seconds** = `N` pre-roll + `(K − N)` forward → **auto-stops**.
-- Transcribe on-device (whisper `tiny.en`).
-- **Show the transcript inline as a notification.** No Room DB, no Drive, no list UI in v0.
-- **Only two settings:** `N` (pre-roll seconds) and `K` (total seconds).
+- Transcribe on-device (**whisper `tiny.en`, ~31 MB** for v0).
+- **Show the transcript as a notification** (the result output). No Room DB, no Drive, no list UI in v0.
+- **Settings:** `N` (pre-roll seconds), `K` (total seconds), and the **app whitelist**.
 
 **Success test:** on a real walk with Audiobookshelf + Pixel Buds, one tap yields a correct transcript notification. **Only if this works** do we proceed to: persistence + list UI, Google Drive sync (folder convention `nishparadox/shruti/`, mirroring mastishka's `nishparadox/mastishka/`), Volume-Up long-press + Quick Tap + "Hey Google, snip" triggers, and share-sheet. Everything in §4–§14 below is the full v1 target that v0 grows into.
 
@@ -74,6 +75,7 @@ Prove the core loop on the real Pixel before any polish or persistence:
 | **Quick Tap** (double-tap phone back) | Pixel gesture set to "Open app" → launches a trivial `SnipActivity` that fires + finishes | ✅ | No permission; Pixel-native. |
 | **Notification button** | Persistent capture-session notification with a "Snip" action, tappable from lock screen | ⚠️ needs screen wake | Reliable fallback. |
 | **"Hey Google, snip"** | Google Assistant Routine / App Action → deep-link into `SnipActivity` | ✅ (voice) | Hands-free via Buds; audible. |
+| **Floating bubble** *(v0 / testing)* | Draggable `SYSTEM_ALERT_WINDOW` overlay button | ❌ needs screen on | The v0 trigger; matches the "floats around" feel; great for validation, not for pocket use. |
 
 **Explicitly ruled out** (documented so we don't revisit): power button (any press — Android reserves it), Pixel Buds taps (hard-wired to media keys owned by the player), Bluetooth media buttons (would steal the media session and break the player's play/pause).
 
@@ -81,7 +83,9 @@ Prove the core loop on the real Pixel before any polish or persistence:
 
 Single Android app, **Kotlin + Jetpack Compose** (matches mastishka). Isolated, single-purpose units:
 
-- **`CaptureService`** (foreground service, type `mediaProjection` + `microphone`): owns the `MediaProjection` session and the `AudioPlaybackCapture` `AudioRecord`. Writes PCM into `RingBuffer`. Emits session state. Shows the persistent notification.
+- **`CaptureService`** (foreground service, type `mediaProjection` + `microphone`): owns the `MediaProjection` session and the `AudioPlaybackCapture` `AudioRecord`. Its capture config is restricted to the whitelisted apps' UIDs via `addMatchingUid()` (§0), so only selected apps are ever captured. Writes PCM into `RingBuffer`. Emits session state. Shows the persistent notification.
+- **`AppWhitelist` + `MediaSessionWatcher`**: holds the user-selected apps; resolves their UIDs for the capture config, and watches `MediaSessionManager` to **arm/disarm the snip trigger** based on whether a whitelisted app is actively playing — preventing accidental triggers and idle resource use.
+- **`FloatingBubble`** (v0 trigger): a `SYSTEM_ALERT_WINDOW` overlay button that calls `SnipEntryPoint.requestSnip()`.
 - **`RingBuffer`**: fixed-size circular PCM buffer (holds pre-roll seconds). Thread-safe single-writer/single-reader. Pure, unit-testable.
 - **`SnipController`**: on trigger, snapshots `[now−N]` from `RingBuffer` and keeps appending live PCM until `now+M` (or extend). Produces a finalized `ClipPcm`. Pure logic over an audio-source interface (testable without a real mic).
 - **`TriggerLayer`**:
@@ -144,6 +148,7 @@ Capture is source-agnostic (captures whatever plays). Notes are tagged via `Medi
 - **Engine:** whisper.cpp (ggml) via JNI. **Model `tiny.en` Q5_1 (~31 MB)** default; setting to switch to `base.en`.
 - **Mode:** batch over the short finalized clip (no streaming). ~1–3 s on Tensor for a 20 s clip.
 - Model bundled or downloaded on first run; stored in app files.
+- **Upgrade path (likely v1 default): Moonshine Tiny** — 27M params, ONNX/`.ort` 8-bit quantized, <50 MB; **5–15× faster than Whisper** on-device and **~48% lower WER than Whisper Tiny**, purpose-built for short edge clips. Runs via ONNX Runtime Mobile. Becomes the default once v0 validates the loop; v0 stays on whisper `tiny.en` for fastest time-to-working.
 - Android's built-in `SpeechRecognizer` is rejected: it is microphone-only and cannot accept our captured PCM.
 
 ## 11. Error handling
@@ -176,3 +181,7 @@ Capture is source-agnostic (captures whatever plays). Notes are tagged via `Medi
 - `MediaProjection` per-session re-consent friction on Android 14 — acceptable (once per walk), but confirm UX.
 - Whisper `tiny.en` accuracy on proper nouns in audiobooks — `base.en` fallback in settings.
 - OEM background-service killing — Pixel is lenient; note for any future Samsung build.
+
+## 15. Branding
+
+- **App icon:** the Devanagari conjunct **श्र** (*shra*, the first syllable of श्रुति) as a minimal **typographic adaptive icon** — the glyph centered on a calm ground. Rendered via Noto Sans Devanagari so the conjunct forms correctly. Palette to match the mastishka/vishrama suite. Fits the contemplative, minimal, Sanskrit-named ecosystem.
