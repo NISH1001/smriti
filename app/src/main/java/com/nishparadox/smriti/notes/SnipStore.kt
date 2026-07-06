@@ -37,6 +37,11 @@ object SnipStore {
         if (i >= 0) { snips[i] = transform(snips[i]); persist() }
     }
 
+    @Synchronized fun delete(id: Long) {
+        val i = snips.indexOfFirst { it.id == id }
+        if (i >= 0) { snips.removeAt(i); persist() }
+    }
+
     private fun persist() {
         val f = file ?: return
         runCatching { f.writeText(serialize(snips.toList())) }

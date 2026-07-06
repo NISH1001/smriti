@@ -41,6 +41,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -85,6 +86,7 @@ class MainActivity : ComponentActivity() {
                 var pre by remember { mutableStateOf(settings.preRoll.toFloat()) }
                 var tot by remember { mutableStateOf(settings.total.toFloat()) }
                 var showPicker by remember { mutableStateOf(false) }
+                var detailSnip by remember { mutableStateOf<Snip?>(null) }
                 val selected = remember {
                     mutableStateListOf<String>().apply { addAll(settings.whitelist) }
                 }
@@ -194,9 +196,16 @@ class MainActivity : ComponentActivity() {
                                 )
                             } else {
                                 LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-                                    items(SnipStore.snips) { snip -> SnipRow(snip) }
+                                    items(SnipStore.snips) { snip -> SnipRow(snip) { detailSnip = snip } }
                                 }
                             }
+                        }
+                        detailSnip?.let { s ->
+                            SnipDetailDialog(
+                                snip = s,
+                                onDismiss = { detailSnip = null },
+                                onDelete = { SnipStore.delete(s.id); detailSnip = null }
+                            )
                         }
                     } else {
                         Column(
@@ -288,7 +297,7 @@ private fun shareText(ctx: Context, text: String) {
 }
 
 @Composable
-private fun SnipRow(snip: Snip) {
+private fun SnipRow(snip: Snip, onOpen: () -> Unit) {
     val ctx = LocalContext.current
     val badge: String
     val preview: String
@@ -298,7 +307,10 @@ private fun SnipRow(snip: Snip) {
         SnipStatus.FAILED -> { badge = "⚠"; preview = snip.text.ifBlank { "Failed" } }
         SnipStatus.DONE -> { badge = "✓"; preview = snip.text.ifBlank { "(no speech detected)" } }
     }
-    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.Top) {
+    Row(
+        Modifier.fillMaxWidth().clickable { onOpen() }.padding(vertical = 8.dp),
+        verticalAlignment = Alignment.Top
+    ) {
         Text(badge, Modifier.padding(end = 10.dp))
         Column(Modifier.weight(1f)) {
             Text(preview, maxLines = 4, color = MaterialTheme.colorScheme.onBackground)
@@ -365,6 +377,43 @@ private fun AppPickerDialog(selected: SnapshotStateList<String>, onDismiss: () -
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onDismiss) { Text("Done") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SnipDetailDialog(snip: Snip, onDismiss: () -> Unit, onDelete: () -> Unit) {
+    val ctx = LocalContext.current
+    var edited by remember(snip.id) { mutableStateOf(snip.text) }
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface) {
+            Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                Text(
+                    DateUtils.getRelativeTimeSpanString(snip.createdAt).toString() +
+                        (if (snip.durationS > 0) " · ${snip.durationS}s" else ""),
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = edited,
+                    onValueChange = { edited = it },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 360.dp),
+                    label = { Text("Transcript") }
+                )
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = onDelete) {
+                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { shareText(ctx, edited) }) { Text("Share") }
+                    Spacer(Modifier.width(4.dp))
+                    Button(onClick = {
+                        SnipStore.update(snip.id) { it.copy(text = edited) }
+                        onDismiss()
+                    }) { Text("Save") }
                 }
             }
         }
