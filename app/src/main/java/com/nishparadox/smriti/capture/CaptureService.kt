@@ -18,6 +18,7 @@ import android.util.Log
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.nishparadox.smriti.MainActivity
+import com.nishparadox.smriti.StopReceiver
 import com.nishparadox.smriti.notes.DeviceId
 import com.nishparadox.smriti.notes.DriveSync
 import com.nishparadox.smriti.notes.Snip
@@ -92,9 +93,8 @@ class CaptureService : Service(), SnipEntryPoint {
         val contentPi = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
         )
-        val stopPi = PendingIntent.getService(
-            this, 1, Intent(this, CaptureService::class.java).setAction(ACTION_STOP),
-            PendingIntent.FLAG_IMMUTABLE
+        val stopPi = PendingIntent.getBroadcast(
+            this, 2, Intent(this, StopReceiver::class.java), PendingIntent.FLAG_IMMUTABLE
         )
         startForeground(
             1,
@@ -257,6 +257,7 @@ class CaptureService : Service(), SnipEntryPoint {
     }
 
     override fun onDestroy() {
+        Log.i(TAG, "onDestroy — session stopped, projection released")
         running.set(false)
         onSnipState = null
         runCatching { record?.stop(); record?.release() }

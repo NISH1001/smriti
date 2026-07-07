@@ -45,5 +45,7 @@
             android:name=".trigger.FloatingBubbleService"
             android:exported="false" />
 
+        <receiver android:name=".StopReceiver" android:exported="false" />
+
     </application>
 </manifest>
