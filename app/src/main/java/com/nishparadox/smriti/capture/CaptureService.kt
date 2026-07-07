@@ -55,6 +55,7 @@ class CaptureService : Service(), SnipEntryPoint {
     private var total = 10
     private var sourceLabel = ""
     private var deviceId = ""
+    @Volatile private var snipStartMs = 0L
     private lateinit var ring: RingBuffer
     private var record: AudioRecord? = null
     private var projection: MediaProjection? = null
@@ -168,14 +169,21 @@ class CaptureService : Service(), SnipEntryPoint {
             sc.begin(preRollBuf, total)
             val id = System.currentTimeMillis()
             sc.noteId = id
+            snipStartMs = id
             snipRef.set(sc)
             SnipStore.add(Snip(id = id, createdAt = id, status = SnipStatus.RECORDING, source = sourceLabel, durationS = total, device = deviceId))
             notifySnip(true)
             Log.i(TAG, "snip started preRoll=$preRoll total=$total")
         } else if (snipRef.compareAndSet(s, null)) {
             notifySnip(false)
-            Log.i(TAG, "snip force-stopped")
-            finalizeClip(s.result(), s.noteId)
+            if (System.currentTimeMillis() - snipStartMs < 2000L) {   // tapped stop right away -> cancel
+                SnipStore.delete(s.noteId)
+                toast("Snip cancelled")
+                Log.i(TAG, "snip cancelled (stopped <2s)")
+            } else {
+                Log.i(TAG, "snip force-stopped")
+                finalizeClip(s.result(), s.noteId)
+            }
         }
     }
 
