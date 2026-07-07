@@ -51,6 +51,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -91,6 +92,10 @@ class MainActivity : ComponentActivity() {
             SmritiTheme(themeMode) {
                 var screen by remember { mutableStateOf("main") }
                 var running by remember { mutableStateOf(CaptureService.instance != null) }
+                DisposableEffect(Unit) {
+                    CaptureService.onRunningChanged = { active -> running = active }
+                    onDispose { CaptureService.onRunningChanged = null }
+                }
                 var pre by remember { mutableStateOf(settings.preRoll.toFloat()) }
                 var tot by remember { mutableStateOf(settings.total.toFloat()) }
                 var showPicker by remember { mutableStateOf(false) }

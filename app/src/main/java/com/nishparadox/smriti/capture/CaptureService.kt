@@ -45,6 +45,8 @@ class CaptureService : Service(), SnipEntryPoint {
         @Volatile var instance: CaptureService? = null
         /** Set by the floating bubble to reflect snip state (true = recording). */
         @Volatile var onSnipState: ((Boolean) -> Unit)? = null
+        /** Set by MainActivity to keep its Start/Stop button in sync with the actual session. */
+        @Volatile var onRunningChanged: ((Boolean) -> Unit)? = null
         const val MODEL_ASSET = "models/ggml-tiny.en-q5_1.bin"
         const val TAG = "SMRITI"
         const val ACTION_STOP = "com.nishparadox.smriti.STOP"
@@ -138,6 +140,7 @@ class CaptureService : Service(), SnipEntryPoint {
 
         instance = this
         running.set(true)
+        onRunningChanged?.invoke(true)
         record!!.startRecording()
         thread(name = "smriti-capture") {
             val buf = ShortArray(minBuf)
@@ -260,6 +263,7 @@ class CaptureService : Service(), SnipEntryPoint {
         runCatching { projection?.stop() }
         transcribeExecutor.shutdown()
         instance = null
+        onRunningChanged?.invoke(false)
         super.onDestroy()
     }
 }
