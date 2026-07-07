@@ -2,6 +2,7 @@ package com.nishparadox.smriti.capture
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.media.AudioAttributes
@@ -14,7 +15,9 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
+import com.nishparadox.smriti.MainActivity
 import com.nishparadox.smriti.notes.DeviceId
 import com.nishparadox.smriti.notes.DriveSync
 import com.nishparadox.smriti.notes.Snip
@@ -23,6 +26,7 @@ import com.nishparadox.smriti.notes.SnipStore
 import com.nishparadox.smriti.output.NotificationOutput
 import com.nishparadox.smriti.settings.Settings
 import com.nishparadox.smriti.transcribe.WhisperTranscriber
+import com.nishparadox.smriti.trigger.FloatingBubbleService
 import com.nishparadox.smriti.trigger.SnipEntryPoint
 import java.io.File
 import java.util.concurrent.Executors
@@ -43,6 +47,7 @@ class CaptureService : Service(), SnipEntryPoint {
         @Volatile var onSnipState: ((Boolean) -> Unit)? = null
         const val MODEL_ASSET = "models/ggml-tiny.en-q5_1.bin"
         const val TAG = "SMRITI"
+        const val ACTION_STOP = "com.nishparadox.smriti.STOP"
     }
 
     private val sr = 16000
@@ -63,6 +68,11 @@ class CaptureService : Service(), SnipEntryPoint {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent, flags: Int, startId: Int): Int {
+        if (intent.action == ACTION_STOP) {
+            stopService(Intent(this, FloatingBubbleService::class.java))
+            stopSelf()
+            return START_NOT_STICKY
+        }
         preRoll = intent.getIntExtra("preRoll", 5)
         total = intent.getIntExtra("total", 10)
         val uids = intent.getIntArrayExtra("uids") ?: intArrayOf()
@@ -76,12 +86,22 @@ class CaptureService : Service(), SnipEntryPoint {
         nm.createNotificationChannel(
             NotificationChannel("cap", "Capture", NotificationManager.IMPORTANCE_LOW)
         )
+        val contentPi = PendingIntent.getActivity(
+            this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+        )
+        val stopPi = PendingIntent.getService(
+            this, 1, Intent(this, CaptureService::class.java).setAction(ACTION_STOP),
+            PendingIntent.FLAG_IMMUTABLE
+        )
         startForeground(
             1,
             NotificationCompat.Builder(this, "cap")
                 .setContentTitle("Smriti listening")
-                .setContentText("Tap the स्म bubble to snip")
+                .setContentText("Tap the स्म bubble to snip · tap here to open")
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .setContentIntent(contentPi)
+                .addAction(0, "Stop listening", stopPi)
+                .setOngoing(true)
                 .build()
         )
 
@@ -139,8 +159,13 @@ class CaptureService : Service(), SnipEntryPoint {
     override fun requestSnip() {
         val s = snipRef.get()
         if (s == null) {
+            val preRollBuf = ring.snapshot()
+            if (isSilent(preRollBuf)) {           // nothing playing -> skip the whole pipeline
+                toast("No audio playing — nothing to snip")
+                return
+            }
             val sc = SnipController(sr)
-            sc.begin(ring.snapshot(), total)
+            sc.begin(preRollBuf, total)
             val id = System.currentTimeMillis()
             sc.noteId = id
             snipRef.set(sc)
@@ -159,23 +184,50 @@ class CaptureService : Service(), SnipEntryPoint {
     }
 
     private fun finalizeClip(clip: ShortArray, noteId: Long) {
+        val durationS = clip.size / sr
+        // Backstop for audio that stopped mid-snip: discard premature / near-silent clips.
+        if (clip.size < preRoll * sr || isSilent(clip)) {
+            SnipStore.delete(noteId)
+            Log.i(TAG, "discarded snip (short/silent): ${durationS}s")
+            return
+        }
         val dir = File(filesDir, "clips").apply { mkdirs() }
         val wav = File(dir, "${System.nanoTime()}.wav")
         WavWriter.write(clip, sr, wav)
-        val durationS = clip.size / sr
         Log.i(TAG, "saved ${wav.name} samples=${clip.size}")
         SnipStore.update(noteId) { it.copy(status = SnipStatus.TRANSCRIBING, durationS = durationS) }
         val floats = FloatArray(clip.size) { clip[it] / 32768f }
         transcribeExecutor.execute {
             val t = ensureTranscriber()
-            val ok = t != null && t.loaded
-            val text = if (ok) t!!.transcribe(floats) else "(model not loaded)"
-            Log.i(TAG, "transcript: $text")
-            SnipStore.update(noteId) {
-                it.copy(status = if (ok) SnipStatus.DONE else SnipStatus.FAILED, text = text)
+            if (t == null || !t.loaded) {
+                SnipStore.update(noteId) { it.copy(status = SnipStatus.FAILED, text = "(model not loaded)") }
+                return@execute
             }
+            val text = cleanTranscript(t.transcribe(floats))
+            Log.i(TAG, "transcript: '$text'")
+            if (text.isBlank()) {                 // silence / no speech -> drop, don't clutter the list
+                SnipStore.delete(noteId)
+                return@execute
+            }
+            SnipStore.update(noteId) { it.copy(status = SnipStatus.DONE, text = text) }
             NotificationOutput.showTranscript(this, text)
         }
+    }
+
+    /** True if the loudest sample is essentially silence (nothing was playing). */
+    private fun isSilent(clip: ShortArray): Boolean {
+        if (clip.isEmpty()) return true
+        var peak = 0
+        for (v in clip) { val a = if (v < 0) -v.toInt() else v.toInt(); if (a > peak) peak = a }
+        return peak < 150
+    }
+
+    /** Strip Whisper non-speech markers like [BLANK_AUDIO], [MUSIC]; blank => nothing to keep. */
+    private fun cleanTranscript(text: String): String =
+        text.replace(Regex("\\[[^\\]]*\\]"), "").trim()
+
+    private fun toast(msg: String) {
+        main.post { Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show() }
     }
 
     private fun ensureTranscriber(): WhisperTranscriber? {
