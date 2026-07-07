@@ -94,7 +94,10 @@ object DriveSync {
 
     private fun writeMine() {
         val mine = SnipStore.ownDone()
-        val text = mine.joinToString(separator = "\n", postfix = "\n") { SnipStore.toJson(it).toString() }
+        // Bare records — device identity is the filename (protocol §3), not the record.
+        val text = mine.joinToString(separator = "\n", postfix = "\n") {
+            SnipStore.toJson(it, includeDevice = false).toString()
+        }
         var uri = deviceFileUri() ?: return
         if (!writeTo(uri, text)) {          // stale URI (file deleted/moved) → re-resolve once
             clearFileUri()
