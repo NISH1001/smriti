@@ -47,6 +47,7 @@ class CaptureService : Service(), SnipEntryPoint {
     private val sr = 16000
     private var preRoll = 5
     private var total = 10
+    private var sourceLabel = ""
     private lateinit var ring: RingBuffer
     private var record: AudioRecord? = null
     private var projection: MediaProjection? = null
@@ -63,6 +64,7 @@ class CaptureService : Service(), SnipEntryPoint {
         preRoll = intent.getIntExtra("preRoll", 5)
         total = intent.getIntExtra("total", 10)
         val uids = intent.getIntArrayExtra("uids") ?: intArrayOf()
+        sourceLabel = intent.getStringExtra("sourceLabel") ?: ""
         ring = RingBuffer(sr * preRoll)
         SnipStore.ensureLoaded(this)
         DriveSync.init(this, Settings(this).driveRoot)
@@ -139,7 +141,7 @@ class CaptureService : Service(), SnipEntryPoint {
             val id = System.currentTimeMillis()
             sc.noteId = id
             snipRef.set(sc)
-            SnipStore.add(Snip(id = id, createdAt = id, status = SnipStatus.RECORDING, durationS = total))
+            SnipStore.add(Snip(id = id, createdAt = id, status = SnipStatus.RECORDING, source = sourceLabel, durationS = total))
             notifySnip(true)
             Log.i(TAG, "snip started preRoll=$preRoll total=$total")
         } else if (snipRef.compareAndSet(s, null)) {

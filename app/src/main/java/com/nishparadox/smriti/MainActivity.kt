@@ -123,6 +123,10 @@ class MainActivity : ComponentActivity() {
                                 putExtra("preRoll", pre.toInt())
                                 putExtra("total", tot.toInt())
                                 putExtra("uids", uids)
+                                putExtra(
+                                    "sourceLabel",
+                                    if (selected.size == 1) labelOf(this@MainActivity, selected.first()) else ""
+                                )
                             }
                         )
                         startService(Intent(this@MainActivity, FloatingBubbleService::class.java))
@@ -205,7 +209,7 @@ class MainActivity : ComponentActivity() {
                             Spacer(Modifier.height(4.dp))
                             if (SnipStore.snips.isEmpty()) {
                                 Text(
-                                    "Your snips will appear here.",
+                                    "Your smaran will appear here.",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
                                 )
                             } else {
@@ -352,7 +356,11 @@ private fun SnipRow(snip: Snip, onOpen: () -> Unit) {
         Column(Modifier.weight(1f)) {
             Text(preview, maxLines = 4, color = MaterialTheme.colorScheme.onBackground)
             Text(
-                DateUtils.getRelativeTimeSpanString(snip.createdAt).toString(),
+                buildString {
+                    if (snip.source.isNotBlank()) append("${snip.source} · ")
+                    append(DateUtils.getRelativeTimeSpanString(snip.createdAt))
+                    if (snip.durationS > 0) append(" · ${snip.durationS}s")
+                },
                 fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
