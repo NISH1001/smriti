@@ -101,6 +101,7 @@ class MainActivity : ComponentActivity() {
                     if (uri != null && DriveSync.setup(uri)) {
                         settings.driveRoot = uri.toString()
                         DriveSync.pull()
+                        DriveSync.syncMine()   // push existing notes right away
                         driveConnected = true
                     }
                 }
@@ -291,7 +292,7 @@ class MainActivity : ComponentActivity() {
                             Spacer(Modifier.height(24.dp))
                             Text("Google Drive sync", fontSize = 16.sp)
                             Text(
-                                "Notes sync as jsonl to a Drive folder — no account or API. Grant the folder once (pick or create nishparadox/smriti).",
+                                "Notes sync as jsonl to a Drive folder — no account or API. Grant your nishparadox/ folder once; smriti creates its own smriti/snips/ inside.",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
                             )
                             Spacer(Modifier.height(8.dp))

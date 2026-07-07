@@ -63,8 +63,13 @@ object DriveSync {
 
     private fun snipsFolder(): DocumentFile? {
         if (root.isEmpty()) return null
-        val r = DocumentFile.fromTreeUri(app, Uri.parse(root)) ?: return null
-        return r.findFile("snips")?.takeIf { it.isDirectory } ?: r.createDirectory("snips")
+        val granted = DocumentFile.fromTreeUri(app, Uri.parse(root)) ?: return null
+        // The grant may be the ecosystem root (nishparadox/) — then auto-create smriti/ —
+        // or the smriti app folder itself. Either way we end at <smriti>/snips/.
+        val smriti = if (granted.name == "smriti") granted
+        else granted.findFile("smriti")?.takeIf { it.isDirectory } ?: granted.createDirectory("smriti")
+        smriti ?: return null
+        return smriti.findFile("snips")?.takeIf { it.isDirectory } ?: smriti.createDirectory("snips")
     }
 
     /** Rewrite this device's whole file with its own finished notes (single-writer, "wt" truncates). */
