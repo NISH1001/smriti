@@ -18,6 +18,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -47,6 +48,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
@@ -59,6 +64,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
@@ -80,6 +86,7 @@ import com.nishparadox.smriti.settings.Settings
 import com.nishparadox.smriti.trigger.FloatingBubbleService
 import com.nishparadox.smriti.ui.SmritiTheme
 import com.nishparadox.smriti.ui.ThemeMode
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -98,6 +105,15 @@ class MainActivity : ComponentActivity() {
                 DisposableEffect(Unit) {
                     CaptureService.onRunningChanged = { active -> running = active }
                     onDispose { CaptureService.onRunningChanged = null }
+                }
+                val snackbar = remember { SnackbarHostState() }
+                val scope = rememberCoroutineScope()
+                fun deleteWithUndo(snip: Snip) {
+                    SnipStore.delete(snip.id)
+                    scope.launch {
+                        val r = snackbar.showSnackbar("Deleted", actionLabel = "Undo", duration = SnackbarDuration.Short)
+                        if (r == SnackbarResult.ActionPerformed) SnipStore.restore(snip)
+                    }
                 }
                 var pre by remember { mutableStateOf(settings.preRoll.toFloat()) }
                 var tot by remember { mutableStateOf(settings.total.toFloat()) }
@@ -160,6 +176,7 @@ class MainActivity : ComponentActivity() {
                     running = false
                 }
 
+                Box(Modifier.fillMaxSize()) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     if (screen == "main") {
                         val canOverlay = AndroidSettings.canDrawOverlays(this@MainActivity)
@@ -252,27 +269,25 @@ class MainActivity : ComponentActivity() {
                                         val dismiss = rememberSwipeToDismissBoxState(
                                             positionalThreshold = { it * 0.5f },   // friction: past halfway
                                             confirmValueChange = { v ->
-                                                if (v == SwipeToDismissBoxValue.EndToStart) {
-                                                    SnipStore.delete(snip.id); true
+                                                if (v != SwipeToDismissBoxValue.Settled) {   // either direction
+                                                    deleteWithUndo(snip); true
                                                 } else false
                                             }
                                         )
                                         SwipeToDismissBox(
                                             state = dismiss,
-                                            enableDismissFromStartToEnd = false,
+                                            enableDismissFromStartToEnd = !selectionMode,
                                             enableDismissFromEndToStart = !selectionMode,
                                             backgroundContent = {
                                                 Row(
                                                     Modifier.fillMaxSize()
                                                         .background(MaterialTheme.colorScheme.errorContainer)
                                                         .padding(horizontal = 24.dp),
-                                                    horizontalArrangement = Arrangement.End,
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
-                                                    Icon(
-                                                        Icons.Filled.Delete, contentDescription = "Delete",
-                                                        tint = MaterialTheme.colorScheme.onErrorContainer
-                                                    )
+                                                    Icon(Icons.Filled.Delete, "Delete", tint = MaterialTheme.colorScheme.onErrorContainer)
+                                                    Icon(Icons.Filled.Delete, "Delete", tint = MaterialTheme.colorScheme.onErrorContainer)
                                                 }
                                             }
                                         ) {
@@ -296,7 +311,7 @@ class MainActivity : ComponentActivity() {
                             SnipDetailDialog(
                                 snip = s,
                                 onDismiss = { detailSnip = null },
-                                onDelete = { SnipStore.delete(s.id); detailSnip = null }
+                                onDelete = { deleteWithUndo(s); detailSnip = null }
                             )
                         }
                     } else {
@@ -396,6 +411,8 @@ class MainActivity : ComponentActivity() {
                             AppPickerDialog(selected = selected, onDismiss = { showPicker = false })
                         }
                     }
+                }
+                SnackbarHost(hostState = snackbar, modifier = Modifier.align(Alignment.BottomCenter))
                 }
             }
         }

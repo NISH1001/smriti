@@ -55,6 +55,14 @@ object SnipStore {
         persist()
     }
 
+    /** Undo a delete: re-insert in order and re-sync (fires [onChanged]). */
+    @Synchronized fun restore(s: Snip) {
+        if (snips.any { it.id == s.id }) return
+        val idx = snips.indexOfFirst { it.createdAt < s.createdAt }
+        if (idx < 0) snips.add(s) else snips.add(idx, s)
+        persist(); onChanged?.invoke()
+    }
+
     /** This device's finished notes — what we write to Drive ("" = legacy own; deviceId = stamped own). */
     @Synchronized fun ownDone(deviceId: String): List<Snip> =
         snips.filter { it.status == SnipStatus.DONE && (it.device == deviceId || it.device.isEmpty()) }
