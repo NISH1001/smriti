@@ -292,7 +292,7 @@ class MainActivity : ComponentActivity() {
                             Spacer(Modifier.height(24.dp))
                             Text("Google Drive sync", fontSize = 16.sp)
                             Text(
-                                "Notes sync as jsonl to a Drive folder — no account or API. Grant your nishparadox/ folder once; smriti creates its own smriti/snips/ inside.",
+                                "Notes sync as plain files to a Drive folder — no account or API. Pick any folder once; Smriti makes its own smriti/ subfolder inside it.",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
                             )
                             Spacer(Modifier.height(8.dp))
