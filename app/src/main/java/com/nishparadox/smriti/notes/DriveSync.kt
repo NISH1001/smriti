@@ -24,6 +24,9 @@ object DriveSync {
     @Volatile var root: String = ""
     val enabled: Boolean get() = root.isNotEmpty()
 
+    /** Resolved snips/ folder, cached for the process so we never race-create a duplicate. */
+    @Volatile private var snipsDir: DocumentFile? = null
+
     /** Stable per-device id: `pixel-9-<6 hex of ANDROID_ID>` (protocol §3). */
     private val deviceId: String by lazy {
         val androidId = runCatching {
@@ -48,10 +51,11 @@ object DriveSync {
             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
         )
         root = uri.toString()
+        snipsDir = null
         true
     }.getOrElse { Log.e(TAG, "setup failed", it); false }
 
-    fun disable() { root = "" }
+    fun disable() { root = ""; snipsDir = null }
 
     fun syncMine() {
         if (enabled) io.execute { runCatching { writeMine() }.onFailure { Log.e(TAG, "writeMine", it) } }
@@ -62,15 +66,27 @@ object DriveSync {
     }
 
     private fun snipsFolder(): DocumentFile? {
+        snipsDir?.let { if (it.exists()) return it }   // reuse within this process — no re-create
         if (root.isEmpty()) return null
         val granted = DocumentFile.fromTreeUri(app, Uri.parse(root)) ?: return null
-        // The grant may be the ecosystem root (nishparadox/) — then auto-create smriti/ —
-        // or the smriti app folder itself. Either way we end at <smriti>/snips/.
-        val smriti = if (granted.name == "smriti") granted
-        else granted.findFile("smriti")?.takeIf { it.isDirectory } ?: granted.createDirectory("smriti")
+        // Grant may be the ecosystem root (create/reuse smriti/) or the smriti folder itself.
+        val smriti = if (granted.name == "smriti") granted else findOrCreateDir(granted, "smriti")
         smriti ?: return null
-        return smriti.findFile("snips")?.takeIf { it.isDirectory } ?: smriti.createDirectory("snips")
+        // Reuse an existing snips/ (prefer the one already holding our device file); never make a 2nd.
+        val candidates = smriti.listFiles().filter { it.isDirectory && it.name == "snips" }
+        val dir = candidates.firstOrNull { it.findFile(fileName) != null }
+            ?: candidates.firstOrNull()
+            ?: smriti.createDirectory("snips")
+        snipsDir = dir
+        // Self-heal: delete any *empty* duplicate snips/ folders left by the old race bug.
+        candidates.filter { it.uri != dir?.uri && it.listFiles().isEmpty() }
+            .forEach { runCatching { it.delete() } }
+        return dir
     }
+
+    /** Reuse the first existing child dir with this name, else create it — dedup-safe. */
+    private fun findOrCreateDir(parent: DocumentFile, name: String): DocumentFile? =
+        parent.listFiles().firstOrNull { it.isDirectory && it.name == name } ?: parent.createDirectory(name)
 
     /** Rewrite this device's whole file with its own finished notes (single-writer, "wt" truncates). */
     private fun writeMine() {
