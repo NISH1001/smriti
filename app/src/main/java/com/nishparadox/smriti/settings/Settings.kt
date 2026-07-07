@@ -22,8 +22,17 @@ class Settings(ctx: Context) {
         get() = p.getString("theme", "dark")!!
         set(v) { p.edit().putString("theme", v).apply() }
 
-    /** SAF tree URI of the granted Drive folder (nishparadox/smriti). Empty = sync off. */
+    /** SAF tree URI of the granted Drive folder. Empty = sync off. */
     var driveRoot: String
         get() = p.getString("driveRoot", "")!!
         set(v) { p.edit().putString("driveRoot", v).apply() }
+
+    /** Resolved-once document URIs, persisted so we never re-create (SAF is eventually consistent). */
+    var driveSnipsUri: String
+        get() = p.getString("driveSnipsUri", "")!!
+        set(v) { p.edit().putString("driveSnipsUri", v).apply() }
+
+    var driveFileUri: String
+        get() = p.getString("driveFileUri", "")!!
+        set(v) { p.edit().putString("driveFileUri", v).apply() }
 }
