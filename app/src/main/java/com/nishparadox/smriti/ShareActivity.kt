@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import com.nishparadox.smriti.notes.DeviceId
 import com.nishparadox.smriti.notes.DriveSync
 import com.nishparadox.smriti.notes.Snip
 import com.nishparadox.smriti.notes.SnipStatus
@@ -28,7 +29,7 @@ class ShareActivity : ComponentActivity() {
             }.getOrNull() ?: "Shared"
             val id = System.currentTimeMillis()
             SnipStore.add(
-                Snip(id = id, createdAt = id, status = SnipStatus.DONE, text = text, source = src)
+                Snip(id = id, createdAt = id, status = SnipStatus.DONE, text = text, source = src, device = DeviceId.of(this))
             )
             DriveSync.syncMine()
             Toast.makeText(this, "Saved to Smriti", Toast.LENGTH_SHORT).show()

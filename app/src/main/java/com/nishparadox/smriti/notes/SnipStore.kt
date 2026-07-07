@@ -55,9 +55,9 @@ object SnipStore {
         persist()
     }
 
-    /** This device's own notes (empty device tag) that are finished — what we write to Drive. */
-    @Synchronized fun ownDone(): List<Snip> =
-        snips.filter { it.device.isEmpty() && it.status == SnipStatus.DONE }
+    /** This device's finished notes — what we write to Drive ("" = legacy own; deviceId = stamped own). */
+    @Synchronized fun ownDone(deviceId: String): List<Snip> =
+        snips.filter { it.status == SnipStatus.DONE && (it.device == deviceId || it.device.isEmpty()) }
 
     @Synchronized fun idSet(): Set<Long> = snips.map { it.id }.toSet()
 

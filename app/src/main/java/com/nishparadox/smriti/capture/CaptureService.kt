@@ -15,6 +15,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.nishparadox.smriti.notes.DeviceId
 import com.nishparadox.smriti.notes.DriveSync
 import com.nishparadox.smriti.notes.Snip
 import com.nishparadox.smriti.notes.SnipStatus
@@ -48,6 +49,7 @@ class CaptureService : Service(), SnipEntryPoint {
     private var preRoll = 5
     private var total = 10
     private var sourceLabel = ""
+    private var deviceId = ""
     private lateinit var ring: RingBuffer
     private var record: AudioRecord? = null
     private var projection: MediaProjection? = null
@@ -65,6 +67,7 @@ class CaptureService : Service(), SnipEntryPoint {
         total = intent.getIntExtra("total", 10)
         val uids = intent.getIntArrayExtra("uids") ?: intArrayOf()
         sourceLabel = intent.getStringExtra("sourceLabel") ?: ""
+        deviceId = DeviceId.of(this)
         ring = RingBuffer(sr * preRoll)
         SnipStore.ensureLoaded(this)
         DriveSync.init(this, Settings(this).driveRoot)
@@ -141,7 +144,7 @@ class CaptureService : Service(), SnipEntryPoint {
             val id = System.currentTimeMillis()
             sc.noteId = id
             snipRef.set(sc)
-            SnipStore.add(Snip(id = id, createdAt = id, status = SnipStatus.RECORDING, source = sourceLabel, durationS = total))
+            SnipStore.add(Snip(id = id, createdAt = id, status = SnipStatus.RECORDING, source = sourceLabel, durationS = total, device = deviceId))
             notifySnip(true)
             Log.i(TAG, "snip started preRoll=$preRoll total=$total")
         } else if (snipRef.compareAndSet(s, null)) {

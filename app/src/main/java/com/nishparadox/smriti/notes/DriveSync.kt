@@ -39,15 +39,7 @@ object DriveSync {
     @Volatile private var snipsUri: Uri? = null
     @Volatile private var fileUri: Uri? = null
 
-    /** Stable per-device id: `pixel-9-<6 hex of ANDROID_ID>` (protocol §3). */
-    private val deviceId: String by lazy {
-        val androidId = runCatching {
-            AndroidSettings.Secure.getString(app.contentResolver, AndroidSettings.Secure.ANDROID_ID)
-        }.getOrNull().orEmpty()
-        val hex = androidId.take(6).ifEmpty { "000000" }
-        val model = Build.MODEL.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').ifEmpty { "android" }
-        "$model-$hex"
-    }
+    private val deviceId: String by lazy { DeviceId.of(app) }
     private val fileName: String get() = "$deviceId.jsonl"
 
     fun init(ctx: Context, savedRoot: String) {
@@ -93,7 +85,7 @@ object DriveSync {
     // ---------- write ----------
 
     private fun writeMine() {
-        val mine = SnipStore.ownDone()
+        val mine = SnipStore.ownDone(deviceId)
         val text = mine.joinToString(separator = "\n", postfix = "\n") { SnipStore.toJson(it).toString() }
         var uri = deviceFileUri() ?: return
         if (!writeTo(uri, text)) {          // stale URI (file deleted/moved) → re-resolve once
