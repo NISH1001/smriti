@@ -12,8 +12,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -33,6 +36,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
@@ -55,6 +59,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -91,6 +96,7 @@ class MainActivity : ComponentActivity() {
                 var showPicker by remember { mutableStateOf(false) }
                 var detailSnip by remember { mutableStateOf<Snip?>(null) }
                 var driveConnected by remember { mutableStateOf(settings.driveRoot.isNotEmpty()) }
+                val selectedIds = remember { mutableStateListOf<Long>() }
                 val selected = remember {
                     mutableStateListOf<String>().apply { addAll(settings.whitelist) }
                 }
@@ -205,7 +211,26 @@ class MainActivity : ComponentActivity() {
                             }
 
                             Spacer(Modifier.height(20.dp))
-                            Text("Recent", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                if (selectedIds.isEmpty()) {
+                                    Text("Recent", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                } else {
+                                    Text("${selectedIds.size} selected", fontSize = 16.sp)
+                                    Spacer(Modifier.weight(1f))
+                                    IconButton(onClick = {
+                                        val text = SnipStore.snips.filter { it.id in selectedIds }
+                                            .joinToString("\n\n---\n\n") { it.text }
+                                        shareText(this@MainActivity, text)
+                                    }) { Icon(Icons.Filled.Share, contentDescription = "Share selected") }
+                                    IconButton(onClick = {
+                                        selectedIds.toList().forEach { SnipStore.delete(it) }
+                                        selectedIds.clear()
+                                    }) { Icon(Icons.Filled.Delete, contentDescription = "Delete selected") }
+                                    IconButton(onClick = { selectedIds.clear() }) {
+                                        Icon(Icons.Filled.Close, contentDescription = "Clear selection")
+                                    }
+                                }
+                            }
                             Spacer(Modifier.height(4.dp))
                             if (SnipStore.snips.isEmpty()) {
                                 Text(
@@ -214,7 +239,19 @@ class MainActivity : ComponentActivity() {
                                 )
                             } else {
                                 LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-                                    items(SnipStore.snips) { snip -> SnipRow(snip) { detailSnip = snip } }
+                                    items(SnipStore.snips) { snip ->
+                                        SnipRow(
+                                            snip = snip,
+                                            selected = snip.id in selectedIds,
+                                            selectionMode = selectedIds.isNotEmpty(),
+                                            onOpen = { detailSnip = snip },
+                                            onToggle = {
+                                                if (snip.id in selectedIds) selectedIds.remove(snip.id)
+                                                else selectedIds.add(snip.id)
+                                            },
+                                            onLongPress = { if (snip.id !in selectedIds) selectedIds.add(snip.id) }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -337,8 +374,16 @@ private fun shareText(ctx: Context, text: String) {
     ctx.startActivity(Intent.createChooser(send, "Share snip").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SnipRow(snip: Snip, onOpen: () -> Unit) {
+private fun SnipRow(
+    snip: Snip,
+    selected: Boolean,
+    selectionMode: Boolean,
+    onOpen: () -> Unit,
+    onToggle: () -> Unit,
+    onLongPress: () -> Unit,
+) {
     val ctx = LocalContext.current
     val badge: String
     val preview: String
@@ -349,10 +394,16 @@ private fun SnipRow(snip: Snip, onOpen: () -> Unit) {
         SnipStatus.DONE -> { badge = "✓"; preview = snip.text.ifBlank { "(no speech detected)" } }
     }
     Row(
-        Modifier.fillMaxWidth().clickable { onOpen() }.padding(vertical = 8.dp),
+        Modifier.fillMaxWidth()
+            .combinedClickable(
+                onClick = { if (selectionMode) onToggle() else onOpen() },
+                onLongClick = onLongPress
+            )
+            .background(if (selected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+            .padding(vertical = 8.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.Top
     ) {
-        Text(badge, Modifier.padding(end = 10.dp))
+        Text(if (selected) "☑" else badge, Modifier.padding(end = 10.dp))
         Column(Modifier.weight(1f)) {
             Text(preview, maxLines = 4, color = MaterialTheme.colorScheme.onBackground)
             Text(
@@ -364,7 +415,7 @@ private fun SnipRow(snip: Snip, onOpen: () -> Unit) {
                 fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        if (snip.status == SnipStatus.DONE && snip.text.isNotBlank()) {
+        if (!selectionMode && snip.status == SnipStatus.DONE && snip.text.isNotBlank()) {
             IconButton(onClick = { shareText(ctx, snip.text) }) {
                 Icon(Icons.Filled.Share, contentDescription = "Share")
             }
