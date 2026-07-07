@@ -66,11 +66,11 @@ object SnipStore {
         runCatching { f.writeText(serialize(snips.toList())) }
     }
 
-    fun toJson(s: Snip, includeDevice: Boolean = true): JSONObject = JSONObject()
+    fun toJson(s: Snip): JSONObject = JSONObject()
         .put("id", s.id).put("createdAt", s.createdAt)
         .put("status", s.status.name).put("text", s.text)
         .put("source", s.source).put("durationS", s.durationS)
-        .apply { if (includeDevice) put("device", s.device) }
+        .put("device", s.device)
 
     fun fromJson(o: JSONObject): Snip = Snip(
         id = o.getLong("id"),
