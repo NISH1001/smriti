@@ -15,10 +15,12 @@ import android.os.IBinder
 import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.nishparadox.smriti.notes.DriveSync
 import com.nishparadox.smriti.notes.Snip
 import com.nishparadox.smriti.notes.SnipStatus
 import com.nishparadox.smriti.notes.SnipStore
 import com.nishparadox.smriti.output.NotificationOutput
+import com.nishparadox.smriti.settings.Settings
 import com.nishparadox.smriti.transcribe.WhisperTranscriber
 import com.nishparadox.smriti.trigger.SnipEntryPoint
 import java.io.File
@@ -63,6 +65,7 @@ class CaptureService : Service(), SnipEntryPoint {
         val uids = intent.getIntArrayExtra("uids") ?: intArrayOf()
         ring = RingBuffer(sr * preRoll)
         SnipStore.ensureLoaded(this)
+        DriveSync.init(this, Settings(this).driveRoot)
 
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(

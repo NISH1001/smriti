@@ -21,4 +21,9 @@ class Settings(ctx: Context) {
     var themeMode: String
         get() = p.getString("theme", "dark")!!
         set(v) { p.edit().putString("theme", v).apply() }
+
+    /** SAF tree URI of the granted Drive folder (nishparadox/smriti). Empty = sync off. */
+    var driveRoot: String
+        get() = p.getString("driveRoot", "")!!
+        set(v) { p.edit().putString("driveRoot", v).apply() }
 }

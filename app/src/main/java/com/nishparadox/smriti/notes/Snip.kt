@@ -10,4 +10,6 @@ data class Snip(
     val text: String = "",
     val source: String = "",
     val durationS: Int = 0,
+    /** Empty = created on this device (this phone writes it to Drive); non-empty = pulled from that device. */
+    val device: String = "",
 )

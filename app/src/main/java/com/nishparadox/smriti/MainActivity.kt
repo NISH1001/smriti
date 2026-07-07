@@ -63,6 +63,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.core.graphics.drawable.toBitmap
 import com.nishparadox.smriti.apps.AppWhitelist
 import com.nishparadox.smriti.capture.CaptureService
+import com.nishparadox.smriti.notes.DriveSync
 import com.nishparadox.smriti.notes.Snip
 import com.nishparadox.smriti.notes.SnipStatus
 import com.nishparadox.smriti.notes.SnipStore
@@ -77,6 +78,8 @@ class MainActivity : ComponentActivity() {
         val settings = Settings(this)
         val mpm = getSystemService(MediaProjectionManager::class.java)
         SnipStore.ensureLoaded(this)
+        DriveSync.init(this, settings.driveRoot)
+        DriveSync.pull()
 
         setContent {
             var themeMode by remember { mutableStateOf(ThemeMode.from(settings.themeMode)) }
@@ -87,10 +90,20 @@ class MainActivity : ComponentActivity() {
                 var tot by remember { mutableStateOf(settings.total.toFloat()) }
                 var showPicker by remember { mutableStateOf(false) }
                 var detailSnip by remember { mutableStateOf<Snip?>(null) }
+                var driveConnected by remember { mutableStateOf(settings.driveRoot.isNotEmpty()) }
                 val selected = remember {
                     mutableStateListOf<String>().apply { addAll(settings.whitelist) }
                 }
 
+                val treePicker = rememberLauncherForActivityResult(
+                    ActivityResultContracts.OpenDocumentTree()
+                ) { uri ->
+                    if (uri != null && DriveSync.setup(uri)) {
+                        settings.driveRoot = uri.toString()
+                        DriveSync.pull()
+                        driveConnected = true
+                    }
+                }
                 val notifPerm = rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestPermission()
                 ) { }
@@ -274,6 +287,29 @@ class MainActivity : ComponentActivity() {
                             }
                             Spacer(Modifier.height(8.dp))
                             OutlinedButton(onClick = { showPicker = true }) { Text("＋  Choose apps") }
+
+                            Spacer(Modifier.height(24.dp))
+                            Text("Google Drive sync", fontSize = 16.sp)
+                            Text(
+                                "Notes sync as jsonl to a Drive folder — no account or API. Grant the folder once (pick or create nishparadox/smriti).",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            if (driveConnected) {
+                                Text("Connected ✓", color = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.height(6.dp))
+                                Row {
+                                    OutlinedButton(
+                                        onClick = { DriveSync.pull() },
+                                        modifier = Modifier.padding(end = 8.dp)
+                                    ) { Text("Sync now") }
+                                    OutlinedButton(onClick = {
+                                        DriveSync.disable(); settings.driveRoot = ""; driveConnected = false
+                                    }) { Text("Disconnect") }
+                                }
+                            } else {
+                                Button(onClick = { treePicker.launch(null) }) { Text("Connect Drive folder") }
+                            }
                             Spacer(Modifier.height(24.dp))
                         }
 
