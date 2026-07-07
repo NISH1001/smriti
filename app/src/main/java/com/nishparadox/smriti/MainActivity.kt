@@ -48,8 +48,11 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -244,18 +247,47 @@ class MainActivity : ComponentActivity() {
                                 )
                             } else {
                                 LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-                                    items(SnipStore.snips) { snip ->
-                                        SnipRow(
-                                            snip = snip,
-                                            selected = snip.id in selectedIds,
-                                            selectionMode = selectedIds.isNotEmpty(),
-                                            onOpen = { detailSnip = snip },
-                                            onToggle = {
-                                                if (snip.id in selectedIds) selectedIds.remove(snip.id)
-                                                else selectedIds.add(snip.id)
-                                            },
-                                            onLongPress = { if (snip.id !in selectedIds) selectedIds.add(snip.id) }
+                                    items(SnipStore.snips, key = { it.id }) { snip ->
+                                        val selectionMode = selectedIds.isNotEmpty()
+                                        val dismiss = rememberSwipeToDismissBoxState(
+                                            positionalThreshold = { it * 0.5f },   // friction: past halfway
+                                            confirmValueChange = { v ->
+                                                if (v == SwipeToDismissBoxValue.EndToStart) {
+                                                    SnipStore.delete(snip.id); true
+                                                } else false
+                                            }
                                         )
+                                        SwipeToDismissBox(
+                                            state = dismiss,
+                                            enableDismissFromStartToEnd = false,
+                                            enableDismissFromEndToStart = !selectionMode,
+                                            backgroundContent = {
+                                                Row(
+                                                    Modifier.fillMaxSize()
+                                                        .background(MaterialTheme.colorScheme.errorContainer)
+                                                        .padding(horizontal = 24.dp),
+                                                    horizontalArrangement = Arrangement.End,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Icon(
+                                                        Icons.Filled.Delete, contentDescription = "Delete",
+                                                        tint = MaterialTheme.colorScheme.onErrorContainer
+                                                    )
+                                                }
+                                            }
+                                        ) {
+                                            SnipRow(
+                                                snip = snip,
+                                                selected = snip.id in selectedIds,
+                                                selectionMode = selectionMode,
+                                                onOpen = { detailSnip = snip },
+                                                onToggle = {
+                                                    if (snip.id in selectedIds) selectedIds.remove(snip.id)
+                                                    else selectedIds.add(snip.id)
+                                                },
+                                                onLongPress = { if (snip.id !in selectedIds) selectedIds.add(snip.id) }
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -396,7 +428,7 @@ private fun SnipRow(
         SnipStatus.RECORDING -> { badge = "●"; preview = "Recording… (up to ${snip.durationS}s)" }
         SnipStatus.TRANSCRIBING -> { badge = "⏳"; preview = "Processing · ${snip.durationS}s of audio…" }
         SnipStatus.FAILED -> { badge = "⚠"; preview = snip.text.ifBlank { "Failed" } }
-        SnipStatus.DONE -> { badge = "✓"; preview = snip.text.ifBlank { "(no speech detected)" } }
+        SnipStatus.DONE -> { badge = ""; preview = snip.text.ifBlank { "(no speech detected)" } }
     }
     Row(
         Modifier.fillMaxWidth()
@@ -404,11 +436,12 @@ private fun SnipRow(
                 onClick = { if (selectionMode) onToggle() else onOpen() },
                 onLongClick = onLongPress
             )
-            .background(if (selected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+            .background(if (selected) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.background)
             .padding(vertical = 8.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.Top
     ) {
-        Text(if (selected) "☑" else badge, Modifier.padding(end = 10.dp))
+        val marker = if (selected) "☑" else badge
+        if (marker.isNotEmpty()) Text(marker, Modifier.padding(end = 10.dp))
         Column(Modifier.weight(1f)) {
             Text(preview, maxLines = 4, color = MaterialTheme.colorScheme.onBackground)
             Text(
