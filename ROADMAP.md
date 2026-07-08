@@ -219,6 +219,10 @@ smriti/
 ## Open questions
 
 - `durationS` unit: seconds (int, top-level) — keep consistent across audio & voice.
+- **Model delivery (future optimization):** the Whisper model is bundled in the APK (~60 MB,
+  fully offline) for now. Later, switch to first-run download (~5 MB APK + fetch
+  `ggml-tiny.en-q5_1.bin` from Hugging Face into app storage, with progress + checksum) —
+  smaller download, faster dev installs, and enables letting users pick a model size.
 - Manual-note type value: `NOTE` (chosen) with `source: "You"`.
 - Whether `MEETING` becomes its own type or rides on `VOICE` with `metadata.kind: "meeting"`.
 - macOS Drive path discovery (`~/Library/CloudStorage/GoogleDrive-…` vs `~/Google Drive`).
