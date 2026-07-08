@@ -60,6 +60,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -76,6 +77,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.graphics.drawable.toBitmap
+import androidx.documentfile.provider.DocumentFile
 import com.nishparadox.smriti.apps.AppWhitelist
 import com.nishparadox.smriti.capture.CaptureService
 import com.nishparadox.smriti.notes.DriveSync
@@ -86,12 +88,15 @@ import com.nishparadox.smriti.settings.Settings
 import com.nishparadox.smriti.trigger.FloatingBubbleService
 import com.nishparadox.smriti.ui.SmritiTheme
 import com.nishparadox.smriti.ui.ThemeMode
+import com.nishparadox.smriti.update.UpdateChecker
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val settings = Settings(this)
+        val appVersion = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }
+            .getOrNull() ?: "?"
         val mpm = getSystemService(MediaProjectionManager::class.java)
         SnipStore.ensureLoaded(this)
         DriveSync.init(this, settings.driveRoot)
@@ -115,11 +120,35 @@ class MainActivity : ComponentActivity() {
                         if (r == SnackbarResult.ActionPerformed) SnipStore.restore(snip)
                     }
                 }
+                fun checkForUpdates(silent: Boolean) {
+                    scope.launch {
+                        when (val r = UpdateChecker.check(appVersion)) {
+                            is UpdateChecker.Result.Available -> {
+                                val res = snackbar.showSnackbar(
+                                    "Update available — v${r.version}", actionLabel = "Get",
+                                    duration = SnackbarDuration.Long
+                                )
+                                if (res == SnackbarResult.ActionPerformed)
+                                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(r.url)))
+                            }
+                            UpdateChecker.Result.UpToDate ->
+                                if (!silent) snackbar.showSnackbar("You're on the latest version")
+                            UpdateChecker.Result.Failed ->
+                                if (!silent) snackbar.showSnackbar("Couldn't check for updates")
+                        }
+                    }
+                }
+                LaunchedEffect(Unit) { checkForUpdates(silent = true) }
                 var pre by remember { mutableStateOf(settings.preRoll.toFloat()) }
                 var tot by remember { mutableStateOf(settings.total.toFloat()) }
                 var showPicker by remember { mutableStateOf(false) }
                 var detailSnip by remember { mutableStateOf<Snip?>(null) }
                 var driveConnected by remember { mutableStateOf(settings.driveRoot.isNotEmpty()) }
+                val driveFolder = remember(driveConnected) {
+                    if (driveConnected) runCatching {
+                        DocumentFile.fromTreeUri(this@MainActivity, Uri.parse(settings.driveRoot))?.name
+                    }.getOrNull() else null
+                }
                 val selectedIds = remember { mutableStateListOf<Long>() }
                 val selected = remember {
                     mutableStateListOf<String>().apply { addAll(settings.whitelist) }
@@ -391,6 +420,13 @@ class MainActivity : ComponentActivity() {
                             Spacer(Modifier.height(8.dp))
                             if (driveConnected) {
                                 Text("Connected ✓", color = MaterialTheme.colorScheme.primary)
+                                driveFolder?.let { f ->
+                                    val path = if (f == "smriti") "smriti/snips/" else "$f/smriti/snips/"
+                                    Text(
+                                        "📁 $path",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp
+                                    )
+                                }
                                 Spacer(Modifier.height(6.dp))
                                 Row {
                                     OutlinedButton(
@@ -404,6 +440,15 @@ class MainActivity : ComponentActivity() {
                             } else {
                                 Button(onClick = { treePicker.launch(null) }) { Text("Connect Drive folder") }
                             }
+
+                            Spacer(Modifier.height(24.dp))
+                            Text("About", fontSize = 16.sp)
+                            Text(
+                                "Smriti v$appVersion",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedButton(onClick = { checkForUpdates(false) }) { Text("Check for updates") }
                             Spacer(Modifier.height(24.dp))
                         }
 
