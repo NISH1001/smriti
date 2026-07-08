@@ -35,4 +35,21 @@ class Settings(ctx: Context) {
     var driveFileUri: String
         get() = p.getString("driveFileUri", "")!!
         set(v) { p.edit().putString("driveFileUri", v).apply() }
+
+    /** Which fields the Recent list shows per row (the note text is always shown). */
+    var listFields: Set<String>
+        get() = p.getStringSet("listFields", DEFAULT_LIST_FIELDS)!!
+        set(v) { p.edit().putStringSet("listFields", v).apply() }
+
+    companion object {
+        /** Row-field keys, in display order. */
+        val LIST_FIELDS = listOf(
+            "type" to "Type icon",
+            "source" to "Source",
+            "time" to "Time",
+            "title" to "Title",
+            "url" to "URL",
+        )
+        val DEFAULT_LIST_FIELDS = LIST_FIELDS.map { it.first }.toSet()
+    }
 }

@@ -37,6 +37,20 @@
             </intent-filter>
         </activity>
 
+        <!-- Deep-link capture: smriti://save?text=…&url=…&title=… (Firefox addon target) -->
+        <activity
+            android:name=".SaveLinkActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="smriti" android:host="save" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".capture.CaptureService"
             android:foregroundServiceType="mediaProjection"
