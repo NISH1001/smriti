@@ -21,6 +21,7 @@ import com.nishparadox.smriti.MainActivity
 import com.nishparadox.smriti.StopReceiver
 import com.nishparadox.smriti.notes.DeviceId
 import com.nishparadox.smriti.notes.DriveSync
+import com.nishparadox.smriti.notes.SmaranType
 import com.nishparadox.smriti.notes.Snip
 import com.nishparadox.smriti.notes.SnipStatus
 import com.nishparadox.smriti.notes.SnipStore
@@ -174,7 +175,7 @@ class CaptureService : Service(), SnipEntryPoint {
             sc.noteId = id
             snipStartMs = id
             snipRef.set(sc)
-            SnipStore.add(Snip(id = id, createdAt = id, status = SnipStatus.RECORDING, source = sourceLabel, durationS = total, device = deviceId))
+            SnipStore.add(Snip(id = id, createdAt = id, status = SnipStatus.RECORDING, type = SmaranType.AUDIO, source = sourceLabel, durationS = total, device = deviceId))
             notifySnip(true)
             Log.i(TAG, "snip started preRoll=$preRoll total=$total")
         } else if (snipRef.compareAndSet(s, null)) {

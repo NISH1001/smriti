@@ -78,6 +78,7 @@ My Drive/nishparadox/smriti/snips/<device>.jsonl
   "source": "wikipedia.org",
   "device": "pixel-9-7cd72c",
   "status": "done",
+  "durationS": 0,
   "metadata": { "url": "https://en.wikipedia.org/…", "title": "…", "app": "org.mozilla.firefox" }
 }
 ```
@@ -91,10 +92,11 @@ My Drive/nishparadox/smriti/snips/<device>.jsonl
 | `source`    | short **display** label — an app name (`Audiobookshelf`) or a domain (`wikipedia.org`) |
 | `device`    | which device authored it |
 | `status`    | pipeline state — `recording` → `transcribing` → `done` (or `failed`) |
-| `metadata`  | open JSON; the escape valve for type-specific fields (url, title, durationS, app, author…) |
+| `durationS` | audio/voice length in seconds; `0` for text-like types (kept top-level & typed) |
+| `metadata`  | open JSON, **string values**; the escape valve for type-specific provenance (url, title, app, author…) |
 
 **Design rule:** `source` is a short label for the list; the *precise* origin (full URL,
-package id, book/chapter title, duration) goes in `metadata`. New types and new fields slot
+package id, book/chapter title) goes in `metadata`. New types and new provenance fields slot
 into `metadata` with **zero protocol migration**.
 
 ### Types
@@ -105,8 +107,8 @@ SmaranType { AUDIO, VOICE, WEB, TEXT, NOTE, UNKNOWN }
 
 | type      | `text` is…         | `source`            | `metadata` keys              | born as      |
 |-----------|--------------------|---------------------|------------------------------|--------------|
-| **AUDIO** | Whisper transcript | app (`Audiobookshelf`) | `app`, `durationS`, `title`, `author` | `recording` |
-| **VOICE** | Whisper transcript | `Voice note`        | `durationS`                  | `recording`  |
+| **AUDIO** | Whisper transcript | app (`Audiobookshelf`) | `app`, `title`, `author` | `recording` |
+| **VOICE** | Whisper transcript | `Voice note`        | — (duration is top-level)    | `recording`  |
 | **WEB**   | clipped selection  | domain              | `url`, `title`, `app` (browser) | `done`     |
 | **TEXT**  | shared text        | app                 | `app`                        | `done`       |
 | **NOTE**  | text you typed     | `You`               | — (none)                     | `done`       |
@@ -129,8 +131,8 @@ SmaranType { AUDIO, VOICE, WEB, TEXT, NOTE, UNKNOWN }
 - **Single-writer safety.** Because each device only rewrites its own file, an unknown type
   from another client is only ever *displayed* by us, never rewritten — we can't corrupt it.
 - **Backward migration.** Older records have no `type`/`metadata`: infer `type` on read
-  (`durationS > 0` → `AUDIO`, else `TEXT`), fold legacy top-level `durationS` into
-  `metadata`, default `metadata` to `{}`.
+  (`durationS > 0` → `AUDIO`, else `TEXT`) and default `metadata` to `{}`. `durationS` was
+  already top-level, so it needs no migration.
 
 ---
 
@@ -216,7 +218,7 @@ smriti/
 
 ## Open questions
 
-- `metadata.durationS` unit: seconds (int) — keep consistent across audio & voice.
+- `durationS` unit: seconds (int, top-level) — keep consistent across audio & voice.
 - Manual-note type value: `NOTE` (chosen) with `source: "You"`.
 - Whether `MEETING` becomes its own type or rides on `VOICE` with `metadata.kind: "meeting"`.
 - macOS Drive path discovery (`~/Library/CloudStorage/GoogleDrive-…` vs `~/Google Drive`).

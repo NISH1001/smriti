@@ -74,21 +74,42 @@ object SnipStore {
         runCatching { f.writeText(serialize(snips.toList())) }
     }
 
-    fun toJson(s: Snip): JSONObject = JSONObject()
-        .put("id", s.id).put("createdAt", s.createdAt)
-        .put("status", s.status.name).put("text", s.text)
-        .put("source", s.source).put("durationS", s.durationS)
-        .put("device", s.device)
+    fun toJson(s: Snip): JSONObject {
+        val meta = JSONObject()
+        for ((k, v) in s.metadata) meta.put(k, v)
+        return JSONObject()
+            .put("id", s.id).put("createdAt", s.createdAt)
+            .put("type", s.type.name.lowercase())
+            .put("status", s.status.name.lowercase())
+            .put("text", s.text)
+            .put("source", s.source).put("durationS", s.durationS)
+            .put("device", s.device)
+            .put("metadata", meta)
+    }
 
-    fun fromJson(o: JSONObject): Snip = Snip(
-        id = o.getLong("id"),
-        createdAt = o.optLong("createdAt", o.getLong("id")),
-        status = runCatching { SnipStatus.valueOf(o.getString("status")) }.getOrDefault(SnipStatus.DONE),
-        text = o.optString("text", ""),
-        source = o.optString("source", ""),
-        durationS = o.optInt("durationS", 0),
-        device = o.optString("device", ""),
-    )
+    fun fromJson(o: JSONObject): Snip {
+        val durationS = o.optInt("durationS", 0)
+        // type: tolerant + case-insensitive; an unrecognised value (from a newer/other client)
+        // -> UNKNOWN, never crashes. Legacy records have no "type" — infer it (a positive
+        // duration means it was an audio snip; everything else was shared/typed text).
+        val type = if (o.has("type"))
+            runCatching { SmaranType.valueOf(o.getString("type").uppercase()) }.getOrDefault(SmaranType.UNKNOWN)
+        else if (durationS > 0) SmaranType.AUDIO else SmaranType.TEXT
+        val metadata = o.optJSONObject("metadata")?.let { m ->
+            buildMap { for (k in m.keys()) put(k, m.get(k).toString()) }
+        } ?: emptyMap()
+        return Snip(
+            id = o.getLong("id"),
+            createdAt = o.optLong("createdAt", o.getLong("id")),
+            status = runCatching { SnipStatus.valueOf(o.optString("status").uppercase()) }.getOrDefault(SnipStatus.DONE),
+            type = type,
+            text = o.optString("text", ""),
+            source = o.optString("source", ""),
+            durationS = durationS,
+            device = o.optString("device", ""),
+            metadata = metadata,
+        )
+    }
 
     private fun serialize(list: List<Snip>): String {
         val arr = JSONArray()
