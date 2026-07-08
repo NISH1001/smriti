@@ -179,22 +179,26 @@ Each step is independently shippable and verifiable on the Pixel.
 
 ---
 
-## Repo structure (planned)
+## Repo structure
 
-Smriti's clients share one repo (one schema contract, atomic cross-client changes):
+Smriti's clients share one repo — plain folders, **no submodules for clients** (one schema
+contract, atomic cross-client changes, `git clone` gives you everything):
 
 ```
 smriti/
-  android/       ← current Gradle project moves here (app/, whisper.cpp, gradlew…)
-  macos/         ← later: the desktop hub
-  firefox/       ← the WebExtension
+  android/       ← the Android app (Gradle project + vendored whisper.cpp submodule)
+  macos/         ← the desktop hub (later)
+  firefox/       ← the WebExtension (later)
+  docs/          ← specs/ + plans/
   protocol/      ← extracted schema contract (SCHEMA.md) once macOS starts
-  ROADMAP.md
+  README.md ROADMAP.md
 ```
 
-The `android/` restructure is deferred — it's cheap now (Android is the only client) but not
-blocking; Step 1–3 are edits in place, and the addon can sit in `firefox/` beside the
-current root layout until we do the move.
+- **Build:** `cd android && ./gradlew :app:installDebug`. `whisper.cpp` is a git submodule
+  and the model is gitignored — see [README.md](README.md) for the clone + setup recipe.
+- **Releases:** namespaced semver tags per client — `android/vX.Y.Z`, `firefox/vX.Y.Z`,
+  `macos/vX.Y.Z` — each with a GitHub Release carrying that client's artifact (APK / `.xpi` /
+  `.app`). Clients release on independent cadences from the one repo.
 
 ---
 

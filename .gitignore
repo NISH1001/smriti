@@ -1,23 +1,8 @@
-# Android / Gradle
-*.iml
-.gradle/
-local.properties
-build/
-captures/
-.externalNativeBuild/
-.cxx/
-*.apk
-*.aab
-*.keystore
-*.jks
+# Cross-cutting (per-client ignores live in each client dir, e.g. android/.gitignore)
 
-# whisper.cpp model files (downloaded/bundled, large binaries)
-*.bin
-*.gguf
-models/*.bin
-
-# Android Studio / IntelliJ
+# IDE
 .idea/
+*.iml
 *.hprof
 
 # macOS

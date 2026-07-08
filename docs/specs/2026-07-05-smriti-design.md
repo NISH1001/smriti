@@ -1,4 +1,4 @@
-# Shruti (श्रुति) — Design v1
+# Smriti (श्रुति) — Design v1
 
 > *śruti* — "that which is heard." An eyes-free audio-snipping notebook for walks.
 
@@ -11,7 +11,7 @@
 
 While listening to an audiobook/podcast on a walk (headphones, phone pocketed, screen off, not actively taking notes), I want to grab a passage the moment it strikes me — *with the few seconds of lead-up context I already heard* — and have it become a searchable text note, without stopping or looking at the phone.
 
-**Shruti** runs in the background, continuously buffers the audio being played, and on **one physical-button press** saves *the last few seconds + a short forward window* as a clip that is **transcribed on-device** into a **Markdown note**, synced to Google Drive.
+**Smriti** runs in the background, continuously buffers the audio being played, and on **one physical-button press** saves *the last few seconds + a short forward window* as a clip that is **transcribed on-device** into a **Markdown note**, synced to Google Drive.
 
 ## 0. v0 Prototype scope — build & validate this FIRST (ad-hoc, no Drive)
 
@@ -25,7 +25,7 @@ Prove the core loop on the real Pixel before any polish or persistence:
 - **Show the transcript as a notification** (the result output). No Room DB, no Drive, no list UI in v0.
 - **Settings:** `N` (pre-roll seconds), `K` (total seconds), and the **app whitelist**.
 
-**Success test:** on a real walk with Audiobookshelf + Pixel Buds, one tap yields a correct transcript notification. **Only if this works** do we proceed to: persistence + list UI, Google Drive sync (folder convention `nishparadox/shruti/`, mirroring mastishka's `nishparadox/mastishka/`), Volume-Up long-press + Quick Tap + "Hey Google, snip" triggers, and share-sheet. Everything in §4–§14 below is the full v1 target that v0 grows into.
+**Success test:** on a real walk with Audiobookshelf + Pixel Buds, one tap yields a correct transcript notification. **Only if this works** do we proceed to: persistence + list UI, Google Drive sync (folder convention `nishparadox/smriti/`, mirroring mastishka's `nishparadox/mastishka/`), Volume-Up long-press + Quick Tap + "Hey Google, snip" triggers, and share-sheet. Everything in §4–§14 below is the full v1 target that v0 grows into.
 
 ## 2. Goals / Non-goals
 
