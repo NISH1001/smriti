@@ -15,9 +15,10 @@ import com.nishparadox.smriti.settings.Settings
 /**
  * Deep-link capture target — `smriti://save?text=…&url=…&title=…[&source=…]`.
  *
- * Lets the Firefox addon (or any tool) hand Smriti a web selection *with its URL* — the
- * provenance the plain Android share sheet can't provide. Saved as a WEB smaran with the
- * url + title in [Snip.metadata], no Whisper. Twin of [ShareActivity].
+ * **Any** app or link can fire this intent (a Firefox addon is the first caller, but it's not
+ * web-specific): it hands Smriti a text selection *with its source URL* — provenance the plain
+ * Android share sheet can't provide. Saved as a WEB smaran with url + title in [Snip.metadata],
+ * no Whisper. Twin of [ShareActivity].
  */
 class SaveLinkActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

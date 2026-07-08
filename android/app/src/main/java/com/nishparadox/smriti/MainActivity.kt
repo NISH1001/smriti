@@ -20,6 +20,8 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -42,6 +44,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -73,6 +76,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -81,6 +85,7 @@ import androidx.documentfile.provider.DocumentFile
 import com.nishparadox.smriti.apps.AppWhitelist
 import com.nishparadox.smriti.capture.CaptureService
 import com.nishparadox.smriti.notes.DriveSync
+import com.nishparadox.smriti.notes.SmaranType
 import com.nishparadox.smriti.notes.Snip
 import com.nishparadox.smriti.notes.SnipStatus
 import com.nishparadox.smriti.notes.SnipStore
@@ -92,6 +97,7 @@ import com.nishparadox.smriti.update.UpdateChecker
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    @OptIn(ExperimentalLayoutApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val settings = Settings(this)
@@ -152,6 +158,9 @@ class MainActivity : ComponentActivity() {
                 val selectedIds = remember { mutableStateListOf<Long>() }
                 val selected = remember {
                     mutableStateListOf<String>().apply { addAll(settings.whitelist) }
+                }
+                val listFields = remember {
+                    mutableStateListOf<String>().apply { addAll(settings.listFields) }
                 }
 
                 val treePicker = rememberLauncherForActivityResult(
@@ -324,12 +333,18 @@ class MainActivity : ComponentActivity() {
                                                 snip = snip,
                                                 selected = snip.id in selectedIds,
                                                 selectionMode = selectionMode,
-                                                onOpen = { detailSnip = snip },
+                                                onOpen = {
+                                                    // only finished notes open for edit — a
+                                                    // recording/transcribing snip isn't ready
+                                                    if (snip.status == SnipStatus.DONE || snip.status == SnipStatus.FAILED)
+                                                        detailSnip = snip
+                                                },
                                                 onToggle = {
                                                     if (snip.id in selectedIds) selectedIds.remove(snip.id)
                                                     else selectedIds.add(snip.id)
                                                 },
-                                                onLongPress = { if (snip.id !in selectedIds) selectedIds.add(snip.id) }
+                                                onLongPress = { if (snip.id !in selectedIds) selectedIds.add(snip.id) },
+                                                fields = listFields.toSet()
                                             )
                                         }
                                     }
@@ -375,6 +390,12 @@ class MainActivity : ComponentActivity() {
                             }
                             Spacer(Modifier.height(16.dp))
 
+                            Text("Audio Capture", fontSize = 16.sp)
+                            Text(
+                                "How much audio each snip keeps.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
+                            )
+                            Spacer(Modifier.height(8.dp))
                             Text("Pre-roll (N): ${pre.toInt()} s")
                             Slider(value = pre, onValueChange = { pre = it }, valueRange = 1f..15f)
                             Text("Total clip (K): ${tot.toInt()} s")
@@ -442,6 +463,26 @@ class MainActivity : ComponentActivity() {
                             }
 
                             Spacer(Modifier.height(24.dp))
+                            Text("List display", fontSize = 16.sp)
+                            Text(
+                                "Fields shown per note in the list.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Settings.LIST_FIELDS.forEach { (key, label) ->
+                                    FilterChip(
+                                        selected = key in listFields,
+                                        onClick = {
+                                            if (key in listFields) listFields.remove(key) else listFields.add(key)
+                                            settings.listFields = listFields.toSet()
+                                        },
+                                        label = { Text(label) }
+                                    )
+                                }
+                            }
+
+                            Spacer(Modifier.height(24.dp))
                             Text("About", fontSize = 16.sp)
                             Text(
                                 "Smriti v$appVersion",
@@ -482,6 +523,7 @@ private fun SnipRow(
     onOpen: () -> Unit,
     onToggle: () -> Unit,
     onLongPress: () -> Unit,
+    fields: Set<String>,
 ) {
     val ctx = LocalContext.current
     val badge: String
@@ -506,14 +548,30 @@ private fun SnipRow(
         if (marker.isNotEmpty()) Text(marker, Modifier.padding(end = 10.dp))
         Column(Modifier.weight(1f)) {
             Text(preview, maxLines = 4, color = MaterialTheme.colorScheme.onBackground)
-            Text(
-                buildString {
-                    if (snip.source.isNotBlank()) append("${snip.source} · ")
-                    append(DateUtils.getRelativeTimeSpanString(snip.createdAt))
-                    if (snip.durationS > 0) append(" · ${snip.durationS}s")
-                },
-                fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            val glyph = if ("type" in fields) "${typeGlyph(snip.type)} " else ""
+            val metaTail = buildList {
+                if ("source" in fields && snip.source.isNotBlank()) add(snip.source)
+                if ("time" in fields) {
+                    val t = DateUtils.getRelativeTimeSpanString(snip.createdAt).toString()
+                    add(if (snip.durationS > 0) "$t · ${snip.durationS}s" else t)
+                }
+            }.joinToString(" · ")
+            val metaLine = (glyph + metaTail).trim()
+            if (metaLine.isNotEmpty()) {
+                Text(metaLine, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if ("title" in fields) snip.metadata["title"]?.takeIf { it.isNotBlank() }?.let {
+                Text(
+                    it, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if ("url" in fields) snip.metadata["url"]?.takeIf { it.isNotBlank() }?.let {
+                Text(
+                    it, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    fontSize = 11.sp, color = MaterialTheme.colorScheme.primary
+                )
+            }
         }
         if (!selectionMode && snip.status == SnipStatus.DONE && snip.text.isNotBlank()) {
             IconButton(onClick = { shareText(ctx, snip.text) }) {
@@ -583,11 +641,18 @@ private fun AppPickerDialog(selected: SnapshotStateList<String>, onDismiss: () -
 private fun SnipDetailDialog(snip: Snip, onDismiss: () -> Unit, onDelete: () -> Unit) {
     val ctx = LocalContext.current
     var edited by remember(snip.id) { mutableStateOf(snip.text) }
+    var source by remember(snip.id) { mutableStateOf(snip.source) }
+    val meta = remember(snip.id) {
+        mutableStateListOf<Pair<String, String>>().apply { addAll(snip.metadata.toList()) }
+    }
+    var showDetails by remember(snip.id) { mutableStateOf(false) }
+    val isSpeech = snip.type == SmaranType.AUDIO || snip.type == SmaranType.VOICE
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface) {
-            Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Column(Modifier.fillMaxWidth().padding(16.dp).verticalScroll(rememberScrollState())) {
                 Text(
-                    DateUtils.getRelativeTimeSpanString(snip.createdAt).toString() +
+                    "${typeGlyph(snip.type)} ${snip.type.name.lowercase()} · " +
+                        DateUtils.getRelativeTimeSpanString(snip.createdAt) +
                         (if (snip.durationS > 0) " · ${snip.durationS}s" else ""),
                     fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -595,9 +660,49 @@ private fun SnipDetailDialog(snip: Snip, onDismiss: () -> Unit, onDelete: () -> 
                 OutlinedTextField(
                     value = edited,
                     onValueChange = { edited = it },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 360.dp),
-                    label = { Text("Transcript") }
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 280.dp),
+                    label = { Text(if (isSpeech) "Transcript" else "Note") }
                 )
+                Spacer(Modifier.height(8.dp))
+
+                // Metadata — collapsed by default; tap to view/edit source + fields (url, title, …)
+                Row(
+                    Modifier.fillMaxWidth().clickable { showDetails = !showDetails }
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(if (showDetails) "▾  Details" else "▸  Details", Modifier.weight(1f))
+                    if (!showDetails && source.isNotBlank()) {
+                        Text(source, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                if (showDetails) {
+                    OutlinedTextField(
+                        value = source, onValueChange = { source = it },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true,
+                        label = { Text("Source") }
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    meta.forEachIndexed { i, entry ->
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = entry.first, onValueChange = { meta[i] = it to meta[i].second },
+                                modifier = Modifier.weight(1f), singleLine = true, label = { Text("key") }
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            OutlinedTextField(
+                                value = entry.second, onValueChange = { meta[i] = meta[i].first to it },
+                                modifier = Modifier.weight(1.6f), singleLine = true, label = { Text("value") }
+                            )
+                            IconButton(onClick = { meta.removeAt(i) }) {
+                                Icon(Icons.Filled.Close, contentDescription = "Remove field")
+                            }
+                        }
+                        Spacer(Modifier.height(4.dp))
+                    }
+                    TextButton(onClick = { meta.add("" to "") }) { Text("＋ Add field") }
+                }
+
                 Spacer(Modifier.height(12.dp))
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = onDelete) {
@@ -607,11 +712,24 @@ private fun SnipDetailDialog(snip: Snip, onDismiss: () -> Unit, onDelete: () -> 
                     TextButton(onClick = { shareText(ctx, edited) }) { Text("Share") }
                     Spacer(Modifier.width(4.dp))
                     Button(onClick = {
-                        SnipStore.update(snip.id) { it.copy(text = edited) }
+                        val cleanedMeta = meta.filter { it.first.isNotBlank() }
+                            .associate { it.first.trim() to it.second }
+                        SnipStore.update(snip.id) {
+                            it.copy(text = edited, source = source.trim(), metadata = cleanedMeta)
+                        }
                         onDismiss()
                     }) { Text("Save") }
                 }
             }
         }
     }
+}
+
+private fun typeGlyph(t: SmaranType): String = when (t) {
+    SmaranType.AUDIO -> "🎧"
+    SmaranType.VOICE -> "🎙"
+    SmaranType.WEB -> "🌐"
+    SmaranType.TEXT -> "📄"
+    SmaranType.NOTE -> "✍"
+    SmaranType.UNKNOWN -> "•"
 }
