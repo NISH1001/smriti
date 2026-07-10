@@ -1,0 +1,3 @@
+# web-ext build/sign output + AMO upload tracking
+web-ext-artifacts/
+.amo-upload-uuid
