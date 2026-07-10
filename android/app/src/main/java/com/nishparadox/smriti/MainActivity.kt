@@ -17,6 +17,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,7 +40,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
@@ -97,6 +101,13 @@ import com.nishparadox.smriti.trigger.FloatingBubbleService
 import com.nishparadox.smriti.ui.SmritiTheme
 import com.nishparadox.smriti.ui.ThemeMode
 import com.nishparadox.smriti.update.UpdateChecker
+import java.time.Instant
+import java.time.Month
+import java.time.YearMonth
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
+import java.util.Locale
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -152,6 +163,11 @@ class MainActivity : ComponentActivity() {
                 var tot by remember { mutableStateOf(settings.total.toFloat()) }
                 var showPicker by remember { mutableStateOf(false) }
                 var detailSnip by remember { mutableStateOf<Snip?>(null) }
+                var query by remember { mutableStateOf("") }
+                var typeFilter by remember { mutableStateOf<SmaranType?>(null) }
+                var fromMonth by remember { mutableStateOf<YearMonth?>(null) }
+                var toMonth by remember { mutableStateOf<YearMonth?>(YearMonth.now()) }   // "To" defaults to current month
+                var datePickerFor by remember { mutableStateOf<String?>(null) }   // "from" | "to" | null
                 var driveConnected by remember { mutableStateOf(settings.driveRoot.isNotEmpty()) }
                 val driveFolder = remember(driveConnected) {
                     if (driveConnected) runCatching {
@@ -268,14 +284,8 @@ class MainActivity : ComponentActivity() {
                                 }
                             } else {
                                 Spacer(Modifier.height(14.dp))
-                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    if (selectedIds.isEmpty()) {
-                                        Text(
-                                            "RECENT",
-                                            fontSize = 12.sp, letterSpacing = 1.5.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    } else {
+                                if (selectedIds.isNotEmpty()) {
+                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                         Text("${selectedIds.size} selected", fontSize = 16.sp)
                                         Spacer(Modifier.weight(1f))
                                         IconButton(onClick = {
@@ -291,10 +301,95 @@ class MainActivity : ComponentActivity() {
                                             Icon(Icons.Filled.Close, contentDescription = "Clear selection")
                                         }
                                     }
+                                } else {
+                                    OutlinedTextField(
+                                        value = query,
+                                        onValueChange = { query = it },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        placeholder = { Text("Search smaran") },
+                                        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                                        singleLine = true
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Row(
+                                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        FilterChip(
+                                            selected = typeFilter == null,
+                                            onClick = { typeFilter = null },
+                                            label = { Text("All") }
+                                        )
+                                        listOf(SmaranType.AUDIO, SmaranType.WEB, SmaranType.TEXT, SmaranType.NOTE).forEach { t ->
+                                            FilterChip(
+                                                selected = typeFilter == t,
+                                                onClick = { typeFilter = if (typeFilter == t) null else t },
+                                                label = { Text(t.name.lowercase().replaceFirstChar { it.uppercase() }) }
+                                            )
+                                        }
+                                    }
+                                    Spacer(Modifier.height(8.dp))
+                                    val monthFmt = remember { DateTimeFormatter.ofPattern("MMM yyyy") }
+                                    val nowMonth = remember { YearMonth.now() }
+                                    val anyActive = query.isNotBlank() || typeFilter != null ||
+                                        fromMonth != null || toMonth != nowMonth
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        FilterChip(
+                                            selected = fromMonth != null,
+                                            onClick = { datePickerFor = "from" },
+                                            label = { Text(fromMonth?.format(monthFmt) ?: "From") }
+                                        )
+                                        Text("→", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        FilterChip(
+                                            selected = true,
+                                            onClick = { datePickerFor = "to" },
+                                            label = { Text(toMonth?.format(monthFmt) ?: "To") }
+                                        )
+                                        if (anyActive) {
+                                            IconButton(onClick = {
+                                                query = ""; typeFilter = null; fromMonth = null; toMonth = nowMonth
+                                            }) {
+                                                Icon(Icons.Filled.Close, contentDescription = "Clear filters")
+                                            }
+                                        }
+                                    }
+                                    if (datePickerFor != null) {
+                                        MonthYearPickerDialog(
+                                            initial = (if (datePickerFor == "from") fromMonth else toMonth) ?: nowMonth,
+                                            allowAny = datePickerFor == "from",
+                                            onPick = { picked ->
+                                                if (datePickerFor == "from") fromMonth = picked
+                                                else toMonth = picked ?: nowMonth
+                                                datePickerFor = null
+                                            },
+                                            onDismiss = { datePickerFor = null }
+                                        )
+                                    }
                                 }
-                                Spacer(Modifier.height(8.dp))
+                                Spacer(Modifier.height(10.dp))
+                                val q = query.trim().lowercase()
+                                val filtered = SnipStore.snips.filter { s ->
+                                    val ym = YearMonth.from(Instant.ofEpochMilli(s.createdAt).atZone(ZoneId.systemDefault()))
+                                    (fromMonth == null || ym >= fromMonth) &&
+                                        (toMonth == null || ym <= toMonth) &&
+                                        (typeFilter == null || s.type == typeFilter) &&
+                                        (q.isEmpty() ||
+                                            s.text.lowercase().contains(q) ||
+                                            s.source.lowercase().contains(q) ||
+                                            s.metadata["title"]?.lowercase()?.contains(q) == true ||
+                                            s.metadata["url"]?.lowercase()?.contains(q) == true)
+                                }
+                                if (filtered.isEmpty()) {
+                                    Text(
+                                        "No matches",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
+                                    )
+                                }
                                 LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-                                    items(SnipStore.snips, key = { it.id }) { snip ->
+                                    items(filtered, key = { it.id }) { snip ->
                                         val selectionMode = selectedIds.isNotEmpty()
                                         val dismiss = rememberSwipeToDismissBoxState(
                                             positionalThreshold = { it * 0.5f },   // friction: past halfway
@@ -494,7 +589,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 SnackbarHost(hostState = snackbar, modifier = Modifier.align(Alignment.BottomCenter))
-                if (screen == "main") {
+                if (screen == "main" && snackbar.currentSnackbarData == null) {
                     val active = running
                     FloatingActionButton(
                         onClick = {
@@ -745,4 +840,54 @@ private fun typeGlyph(t: SmaranType): String = when (t) {
     SmaranType.TEXT -> "📄"
     SmaranType.NOTE -> "✍"
     SmaranType.UNKNOWN -> "•"
+}
+
+/** Calendar-style month/year picker: a year ◀ ▶ stepper + a Jan–Dec grid. Scales to any span.
+ *  [allowAny] adds a "clear"/Any option (used by the "From" side). */
+@Composable
+private fun MonthYearPickerDialog(
+    initial: YearMonth,
+    allowAny: Boolean,
+    onPick: (YearMonth?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var year by remember { mutableStateOf(initial.year) }
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface) {
+            Column(Modifier.width(300.dp).padding(16.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { year-- }) {
+                        Icon(Icons.Filled.KeyboardArrowLeft, contentDescription = "Previous year")
+                    }
+                    Text(
+                        "$year", Modifier.weight(1f),
+                        textAlign = TextAlign.Center, fontSize = 18.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    IconButton(onClick = { year++ }) {
+                        Icon(Icons.Filled.KeyboardArrowRight, contentDescription = "Next year")
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                for (r in 0 until 4) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for (c in 0 until 3) {
+                            val m = r * 3 + c + 1
+                            val ym = YearMonth.of(year, m)
+                            val name = Month.of(m).getDisplayName(TextStyle.SHORT, Locale.getDefault())
+                            if (ym == initial) {
+                                Button(onClick = { onPick(ym) }, modifier = Modifier.weight(1f)) { Text(name) }
+                            } else {
+                                OutlinedButton(onClick = { onPick(ym) }, modifier = Modifier.weight(1f)) { Text(name) }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                }
+                if (allowAny) {
+                    TextButton(onClick = { onPick(null) }, modifier = Modifier.align(Alignment.End)) { Text("Any month") }
+                }
+            }
+        }
+    }
 }
