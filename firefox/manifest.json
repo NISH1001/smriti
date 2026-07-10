@@ -1,0 +1,28 @@
+{
+  "manifest_version": 2,
+  "name": "Smriti",
+  "version": "0.1.0",
+  "description": "Save selected text to Smriti, with its page URL and title.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "smriti@nishparadox",
+      "strict_min_version": "121.0",
+      "data_collection_permissions": { "required": ["none"] }
+    }
+  },
+  "permissions": ["contextMenus", "activeTab", "tabs"],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "browser_action": {
+    "default_title": "Save selection to Smriti",
+    "default_icon": {
+      "48": "icons/smriti.svg",
+      "96": "icons/smriti.svg"
+    }
+  },
+  "icons": {
+    "48": "icons/smriti.svg",
+    "96": "icons/smriti.svg"
+  }
+}
