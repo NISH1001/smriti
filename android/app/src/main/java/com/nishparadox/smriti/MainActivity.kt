@@ -45,6 +45,8 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -76,6 +78,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -217,90 +220,79 @@ class MainActivity : ComponentActivity() {
                 Box(Modifier.fillMaxSize()) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     if (screen == "main") {
-                        val canOverlay = AndroidSettings.canDrawOverlays(this@MainActivity)
-                        Column(Modifier.fillMaxSize().systemBarsPadding().padding(20.dp)) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        Column(Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 20.dp, vertical = 12.dp)) {
+                            // Header: identity + settings. Listen lives in the floating button.
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        "स्मृति",
+                                        fontSize = 32.sp, lineHeight = 44.sp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        "capture what matters",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
+                                    )
+                                }
                                 IconButton(onClick = { screen = "settings" }) {
                                     Icon(Icons.Filled.Settings, contentDescription = "Settings")
                                 }
                             }
+                            if (running) {
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    "● Listening — tap the स्म bubble to snip",
+                                    color = MaterialTheme.colorScheme.primary, fontSize = 13.sp
+                                )
+                            }
 
-                            Column(
-                                Modifier.fillMaxWidth(),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Spacer(Modifier.height(8.dp))
-                                Text("स्मृति", fontSize = 44.sp, color = MaterialTheme.colorScheme.primary)
-                                Text(
-                                    "smriti · capture what you hear",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
-                                )
-                                Spacer(Modifier.height(16.dp))
-                                Text(
-                                    if (running) "● Listening — tap the स्म bubble" else "Idle",
-                                    color = MaterialTheme.colorScheme.onBackground
-                                )
-                                Spacer(Modifier.height(12.dp))
-                                if (!running) {
-                                    Button(
-                                        onClick = { startSession() },
-                                        enabled = selected.isNotEmpty() && canOverlay,
-                                        modifier = Modifier.fillMaxWidth(0.8f).height(52.dp)
-                                    ) { Text("▶  Start listening", fontSize = 18.sp) }
-                                } else {
-                                    Button(
-                                        onClick = { stopSession() },
-                                        modifier = Modifier.fillMaxWidth(0.8f).height(52.dp)
-                                    ) { Text("■  Stop", fontSize = 18.sp) }
-                                }
-                                if (!canOverlay) {
-                                    Spacer(Modifier.height(10.dp))
-                                    OutlinedButton(onClick = {
-                                        startActivity(
-                                            Intent(
-                                                AndroidSettings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                                Uri.parse("package:$packageName")
-                                            )
-                                        )
-                                    }) { Text("Grant 'Draw over other apps'") }
-                                }
-                                if (selected.isEmpty()) {
-                                    Spacer(Modifier.height(6.dp))
+                            Spacer(Modifier.height(16.dp))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f))
+
+                            if (SnipStore.snips.isEmpty()) {
+                                Column(
+                                    Modifier.weight(1f).fillMaxWidth(),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
                                     Text(
-                                        "Pick an app to watch in Settings",
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
+                                        "Nothing captured yet",
+                                        color = MaterialTheme.colorScheme.onBackground, fontSize = 16.sp
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(
+                                        "Highlight on the web, share text, or tap ▶ to listen —\nyour smaran show up here.",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 13.sp, lineHeight = 20.sp, textAlign = TextAlign.Center
                                     )
                                 }
-                            }
-
-                            Spacer(Modifier.height(20.dp))
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                if (selectedIds.isEmpty()) {
-                                    Text("Recent", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                } else {
-                                    Text("${selectedIds.size} selected", fontSize = 16.sp)
-                                    Spacer(Modifier.weight(1f))
-                                    IconButton(onClick = {
-                                        val text = SnipStore.snips.filter { it.id in selectedIds }
-                                            .joinToString("\n\n---\n\n") { it.text }
-                                        shareText(this@MainActivity, text)
-                                    }) { Icon(Icons.Filled.Share, contentDescription = "Share selected") }
-                                    IconButton(onClick = {
-                                        selectedIds.toList().forEach { SnipStore.delete(it) }
-                                        selectedIds.clear()
-                                    }) { Icon(Icons.Filled.Delete, contentDescription = "Delete selected") }
-                                    IconButton(onClick = { selectedIds.clear() }) {
-                                        Icon(Icons.Filled.Close, contentDescription = "Clear selection")
+                            } else {
+                                Spacer(Modifier.height(14.dp))
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    if (selectedIds.isEmpty()) {
+                                        Text(
+                                            "RECENT",
+                                            fontSize = 12.sp, letterSpacing = 1.5.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    } else {
+                                        Text("${selectedIds.size} selected", fontSize = 16.sp)
+                                        Spacer(Modifier.weight(1f))
+                                        IconButton(onClick = {
+                                            val text = SnipStore.snips.filter { it.id in selectedIds }
+                                                .joinToString("\n\n---\n\n") { it.text }
+                                            shareText(this@MainActivity, text)
+                                        }) { Icon(Icons.Filled.Share, contentDescription = "Share selected") }
+                                        IconButton(onClick = {
+                                            selectedIds.toList().forEach { SnipStore.delete(it) }
+                                            selectedIds.clear()
+                                        }) { Icon(Icons.Filled.Delete, contentDescription = "Delete selected") }
+                                        IconButton(onClick = { selectedIds.clear() }) {
+                                            Icon(Icons.Filled.Close, contentDescription = "Clear selection")
+                                        }
                                     }
                                 }
-                            }
-                            Spacer(Modifier.height(4.dp))
-                            if (SnipStore.snips.isEmpty()) {
-                                Text(
-                                    "Your smaran will appear here.",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
-                                )
-                            } else {
+                                Spacer(Modifier.height(8.dp))
                                 LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
                                     items(SnipStore.snips, key = { it.id }) { snip ->
                                         val selectionMode = selectedIds.isNotEmpty()
@@ -397,12 +389,15 @@ class MainActivity : ComponentActivity() {
                             )
                             Spacer(Modifier.height(8.dp))
                             Text("Pre-roll (N): ${pre.toInt()} s")
-                            Slider(value = pre, onValueChange = { pre = it }, valueRange = 1f..15f)
+                            Slider(
+                                value = pre, onValueChange = { pre = it },
+                                valueRange = 1f..15f, steps = 13   // snap to whole seconds
+                            )
                             Text("Total clip (K): ${tot.toInt()} s")
                             Slider(
                                 value = tot,
                                 onValueChange = { tot = it.coerceAtLeast(pre + 1f) },
-                                valueRange = 5f..60f
+                                valueRange = 5f..60f, steps = 54    // snap to whole seconds
                             )
                             Spacer(Modifier.height(20.dp))
 
@@ -499,6 +494,24 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 SnackbarHost(hostState = snackbar, modifier = Modifier.align(Alignment.BottomCenter))
+                if (screen == "main") {
+                    val active = running
+                    FloatingActionButton(
+                        onClick = {
+                            if (active) stopSession()
+                            else if (selected.isEmpty())
+                                scope.launch { snackbar.showSnackbar("Pick an app to watch in Settings first") }
+                            else if (!AndroidSettings.canDrawOverlays(this@MainActivity))
+                                scope.launch { snackbar.showSnackbar("Grant 'Draw over other apps' in Settings") }
+                            else startSession()
+                        },
+                        containerColor = if (active) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primary,
+                        contentColor = if (active) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp)
+                    ) {
+                        Text(if (active) "■" else "▶", fontSize = 20.sp)
+                    }
+                }
                 }
             }
         }
