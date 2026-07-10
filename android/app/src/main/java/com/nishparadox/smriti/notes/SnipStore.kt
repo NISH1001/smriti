@@ -69,6 +69,10 @@ object SnipStore {
 
     @Synchronized fun idSet(): Set<Long> = snips.map { it.id }.toSet()
 
+    /** True if a note with this exact text + url already exists — content de-dup for saves. */
+    @Synchronized fun hasContent(text: String, url: String): Boolean =
+        snips.any { it.text == text && (it.metadata["url"] ?: "") == url }
+
     private fun persist() {
         val f = file ?: return
         runCatching { f.writeText(serialize(snips.toList())) }
