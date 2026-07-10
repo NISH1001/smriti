@@ -1,41 +1,49 @@
 # Smriti — Firefox addon
 
-A minimal WebExtension: **select text → Save to Smriti**. It sends the selection plus the
-page's URL and title to the Smriti Android app via the `smriti://save` deep link
-(see [../docs/save-protocol.md](../docs/save-protocol.md)). No network, no accounts.
+A minimal in-page **annotation basket**: highlight snippets as you read, collect them, then
+send the batch to Smriti in one shot. Built for Firefox **Android** (works without menus, which
+Firefox Android doesn't surface reliably for extensions).
 
-Two triggers (whichever the Firefox build exposes):
-- **Selection context menu** → "Save to Smriti"
-- **Toolbar/menu button** (reads the current selection)
+## How it works
+
+A content script injects two floating pills (bottom-right):
+
+- **＋ Save to Smriti** — appears when you select text. Tap it to add the selection (with the
+  page's URL + title) to a basket stored locally. Collect as many as you like, across pages.
+- **⬆ Send N to Smriti** — sends the whole basket at once via
+  `smriti://save?items=[…]` (see [../docs/save-protocol.md](../docs/save-protocol.md)), then
+  clears it. The Smriti app shows a "Saved N to Smriti" toast — that's your confirmation.
+
+No network, no accounts, no on-page persistent highlights (that's a possible later step). Each
+snippet keeps its own provenance, so highlights from different pages batch together fine.
 
 ## Install / test
 
-Firefox for Android **release** only installs *signed* add-ons from AMO. So there are two paths:
+Firefox for Android **release** only installs *signed* add-ons from AMO, so:
 
 ### A. Test now (dev) — Firefox Nightly + web-ext
-No AMO account needed; the add-on loads temporarily over USB.
-
-1. Install **Firefox Nightly** (Play Store, package `org.mozilla.fenix`).
-2. Nightly → **Settings → Remote debugging via USB → ON**.
-3. Plug in the phone (USB debugging enabled), then from the repo root:
-   ```bash
-   npx web-ext run -t firefox-android --adb-device <serial> \
-     --firefox-apk org.mozilla.fenix --source-dir firefox
-   ```
-   (`adb devices` shows `<serial>`.) The add-on installs into Nightly for the session.
+```bash
+npx web-ext run -t firefox-android \
+  --adb-bin "$ANDROID_HOME/platform-tools/adb" --adb-device <serial> \
+  --firefox-apk org.mozilla.fenix --source-dir firefox
+```
+(Nightly needs **Settings → Remote debugging via USB → ON**; `adb devices` shows `<serial>`.)
+Loads temporarily; **reload the web page** after install so the content script injects.
 
 ### B. Daily use — AMO unlisted (signed)
-Works on your normal Firefox, permanent.
+```bash
+npx web-ext sign -s firefox --channel=unlisted --api-key=<issuer> --api-secret=<secret>
+```
+Install the resulting signed `.xpi` via its AMO link on the phone.
 
-1. Create an addons.mozilla.org account → generate API credentials (JWT issuer/secret).
-2. Sign it:
-   ```bash
-   npx web-ext sign -s firefox --channel=unlisted \
-     --api-key=<issuer> --api-secret=<secret>
-   ```
-3. Install the resulting signed `.xpi` via its AMO link on the phone.
+## Desktop (later)
 
-## Notes
-- The Smriti app shows its own "Saved to Smriti" toast — that's your confirmation.
-- Bulk capture (`smriti://save?items=[…]`) is supported by the app; the "highlight basket →
-  send N" UI is a planned next iteration of this addon.
+The **same addon** runs on Firefox Desktop unchanged — it's a standard WebExtension. The only
+platform-specific part is who handles `smriti://save`: on Android it's the app (via the
+intent); on desktop the planned **macOS client registers the `smriti://` URL scheme** and
+catches it → Drive. One addon, one protocol, per-platform handler.
+
+## Known limits (minimal version)
+- Very large batches can exceed the deep-link URL size — send in smaller batches for now
+  (auto-chunking is a planned addition).
+- No basket-management UI yet (remove individual items / preview) — it sends everything.
