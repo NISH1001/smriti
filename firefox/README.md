@@ -43,7 +43,11 @@ platform-specific part is who handles `smriti://save`: on Android it's the app (
 intent); on desktop the planned **macOS client registers the `smriti://` URL scheme** and
 catches it → Drive. One addon, one protocol, per-platform handler.
 
+## Settings
+Open the addon's options (Firefox → Extensions → Smriti → Settings) to set **Max snippets per
+send** (default 50). Large batches are auto-split into that many per `smriti://save` so they
+stay under the deep-link URL size limit.
+
 ## Known limits (minimal version)
-- Very large batches can exceed the deep-link URL size — send in smaller batches for now
-  (auto-chunking is a planned addition).
-- No basket-management UI yet (remove individual items / preview) — it sends everything.
+- No basket-management UI beyond tap-to-remove-a-highlight — Send flushes everything.
+- Persist-on-reload uses basic text matching; imperfect on dynamic/duplicate-text pages.

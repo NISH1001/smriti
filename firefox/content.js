@@ -106,6 +106,21 @@
     }
   }
 
+  // Fire chunks sequentially, with a delay between them so rapid intents don't race.
+  function fireChunks(chunks, i) {
+    if (i >= chunks.length) return;
+    const items = chunks[i].map(function (x) {
+      return { text: x.text, url: x.url, title: x.title, source: x.source };
+    });
+    const deep = "smriti://save?items=" + encodeURIComponent(JSON.stringify(items));
+    const a = document.createElement("a");
+    a.href = deep;
+    (document.body || document.documentElement).appendChild(a);
+    a.click();
+    a.remove();
+    if (i + 1 < chunks.length) setTimeout(function () { fireChunks(chunks, i + 1); }, 1500);
+  }
+
   pill.addEventListener("click", async function (e) {
     e.preventDefault();
     if (pending) {
@@ -127,19 +142,16 @@
       b.push({ id: id, text: text, url: location.href, title: document.title, source: "Firefox" });
       await setBasket(b); // triggers render()
     } else if (count > 0) {
-      // SEND: fire the whole basket
+      // SEND: split into (configurable) chunks and fire each as its own smriti://save,
+      // so a big batch stays under the deep-link URL size limit.
       const b = await getBasket();
       if (!b.length) return;
-      const items = b.map(function (x) {
-        return { text: x.text, url: x.url, title: x.title, source: x.source };
-      });
-      const deep = "smriti://save?items=" + encodeURIComponent(JSON.stringify(items));
+      const conf = await browser.storage.local.get("chunkSize");
+      const size = Math.max(1, parseInt(conf.chunkSize, 10) || 50);
       await setBasket([]);
-      const a = document.createElement("a");
-      a.href = deep;
-      (document.body || document.documentElement).appendChild(a);
-      a.click();
-      a.remove();
+      const chunks = [];
+      for (let i = 0; i < b.length; i += size) chunks.push(b.slice(i, i + size));
+      fireChunks(chunks, 0);
     }
   });
 
