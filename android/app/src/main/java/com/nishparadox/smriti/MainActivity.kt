@@ -76,6 +76,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -100,6 +101,7 @@ import com.nishparadox.smriti.notes.SmaranType
 import com.nishparadox.smriti.notes.Snip
 import com.nishparadox.smriti.notes.SnipStatus
 import com.nishparadox.smriti.notes.SnipStore
+import com.nishparadox.smriti.search.SearchIndex
 import com.nishparadox.smriti.settings.Settings
 import com.nishparadox.smriti.transcribe.ModelManager
 import com.nishparadox.smriti.trigger.FloatingBubbleService
@@ -124,6 +126,7 @@ class MainActivity : ComponentActivity() {
             .getOrNull() ?: "?"
         val mpm = getSystemService(MediaProjectionManager::class.java)
         SnipStore.ensureLoaded(this)
+        SearchIndex.init(this)
         DriveSync.init(this, settings.driveRoot)
         DriveSync.pull()
 
@@ -402,17 +405,24 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                                 Spacer(Modifier.height(10.dp))
-                                val q = query.trim().lowercase()
-                                val filtered = SnipStore.snips.filter { s ->
+                                // Type + month-range predicate, applied after text ranking.
+                                val passesFilters: (Snip) -> Boolean = { s ->
                                     val ym = YearMonth.from(Instant.ofEpochMilli(s.createdAt).atZone(ZoneId.systemDefault()))
                                     (fromMonth == null || ym >= fromMonth) &&
                                         (toMonth == null || ym <= toMonth) &&
-                                        (typeFilter == null || s.type == typeFilter) &&
-                                        (q.isEmpty() ||
-                                            s.text.lowercase().contains(q) ||
-                                            s.source.lowercase().contains(q) ||
-                                            s.metadata["title"]?.lowercase()?.contains(q) == true ||
-                                            s.metadata["url"]?.lowercase()?.contains(q) == true)
+                                        (typeFilter == null || s.type == typeFilter)
+                                }
+                                // BM25F ranking via AppSearch (async). null = no searchable query →
+                                // keep newest-first. Re-runs on a query change or store change (version).
+                                val ranked by produceState<List<Long>?>(null, query, SnipStore.version) {
+                                    value = if (query.isBlank()) null else SearchIndex.search(query)
+                                }
+                                val rankedIds = ranked   // local val: delegated property can't smart-cast
+                                val filtered = if (rankedIds == null) {
+                                    SnipStore.snips.filter(passesFilters)                 // newest first
+                                } else {
+                                    val byId = SnipStore.snips.associateBy { it.id }
+                                    rankedIds.mapNotNull { byId[it] }.filter(passesFilters)  // best match first
                                 }
                                 if (filtered.isEmpty()) {
                                     Text(
