@@ -16,11 +16,11 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Ecosystem-protocol Drive sync (specs/ecosystem-protocol.md §3–4): NO Google API — the user
- * grants a folder once via SAF; this device writes ONLY its own `snips/<device>.jsonl` and
+ * grants a folder once via SAF; this device writes ONLY its own `smarans/<device>.jsonl` and
  * read-time-unions every other device's `*.jsonl`.
  *
  * Race-free design (Google Drive's SAF provider is eventually consistent, so `findFile` +
- * `createFile` on rapid writes makes duplicates): resolve the snips/ folder and the device
+ * `createFile` on rapid writes makes duplicates): resolve the smarans/ folder and the device
  * file EXACTLY ONCE via DocumentsContract, PERSIST their runtime document URIs, and thereafter
  * write straight to the saved URI — never create again. Writes are debounced so a burst of
  * status changes collapses into one whole-file write. Self-heals earlier duplicates on resolve.
@@ -36,7 +36,7 @@ object DriveSync {
     val enabled: Boolean get() = root.isNotEmpty()
 
     // Resolved-once document URIs (mirrored to Settings so they survive process death).
-    @Volatile private var snipsUri: Uri? = null
+    @Volatile private var smaransUri: Uri? = null
     @Volatile private var fileUri: Uri? = null
 
     private val deviceId: String by lazy { DeviceId.of(app) }
@@ -46,7 +46,7 @@ object DriveSync {
         app = ctx.applicationContext
         root = savedRoot
         val s = Settings(app)
-        snipsUri = s.driveSnipsUri.ifEmpty { null }?.let(Uri::parse)
+        smaransUri = s.driveSmaransUri.ifEmpty { null }?.let(Uri::parse)
         fileUri = s.driveFileUri.ifEmpty { null }?.let(Uri::parse)
         SnipStore.onChanged = { syncMine() }
     }
@@ -64,8 +64,8 @@ object DriveSync {
     fun disable() { root = ""; clearResolved() }
 
     private fun clearResolved() {
-        snipsUri = null; fileUri = null
-        Settings(app).apply { driveSnipsUri = ""; driveFileUri = "" }
+        smaransUri = null; fileUri = null
+        Settings(app).apply { driveSmaransUri = ""; driveFileUri = "" }
     }
 
     /** Debounced: a burst of note changes collapses into one whole-file write. */
@@ -93,7 +93,7 @@ object DriveSync {
             uri = deviceFileUri() ?: return
             writeTo(uri, text)
         }
-        Log.i(TAG, "wrote ${mine.size} notes -> snips/$fileName")
+        Log.i(TAG, "wrote ${mine.size} notes -> smarans/$fileName")
     }
 
     private fun writeTo(uri: Uri, text: String): Boolean = runCatching {
@@ -105,7 +105,7 @@ object DriveSync {
     // ---------- read-time union ----------
 
     private fun pullSiblings() {
-        val folderUri = snipsFolderUri() ?: return
+        val folderUri = smaransFolderUri() ?: return
         val existing = SnipStore.idSet()
         var added = 0
         for ((uri, name) in allChildren(folderUri)) {
@@ -128,28 +128,28 @@ object DriveSync {
 
     // ---------- resolve-once (create at most once, then reuse the persisted URI) ----------
 
-    /** snips/ folder URI. Reuses one holding our file, self-heals empty duplicates, persists it. */
-    @Synchronized private fun snipsFolderUri(): Uri? {
-        snipsUri?.let { if (docExists(it)) return it }
+    /** smarans/ folder URI. Reuses one holding our file, self-heals empty duplicates, persists it. */
+    @Synchronized private fun smaransFolderUri(): Uri? {
+        smaransUri?.let { if (docExists(it)) return it }
         if (root.isEmpty()) return null
         val granted = DocumentFile.fromTreeUri(app, Uri.parse(root)) ?: return null
         val smriti = if (granted.name == "smriti") granted else findOrCreateDir(granted, "smriti") ?: return null
-        val candidates = smriti.listFiles().filter { it.isDirectory && it.name == "snips" }
+        val candidates = smriti.listFiles().filter { it.isDirectory && it.name == "smarans" }
         val chosen = candidates.firstOrNull { hasChild(it.uri, fileName) }
             ?: candidates.firstOrNull()
-            ?: smriti.createDirectory("snips")
+            ?: smriti.createDirectory("smarans")
             ?: return null
         candidates.filter { it.uri != chosen.uri && childCount(it.uri) == 0 }
             .forEach { runCatching { it.delete() } }
-        snipsUri = chosen.uri
-        Settings(app).driveSnipsUri = chosen.uri.toString()
+        smaransUri = chosen.uri
+        Settings(app).driveSmaransUri = chosen.uri.toString()
         return chosen.uri
     }
 
     /** This device's jsonl URI. Reuses/dedups (keep largest), else creates once, persists it. */
     @Synchronized private fun deviceFileUri(): Uri? {
         fileUri?.let { if (docExists(it)) return it }
-        val folder = snipsFolderUri() ?: return null
+        val folder = smaransFolderUri() ?: return null
         val matches = childrenNamed(folder, fileName)
         val chosen = matches.maxByOrNull { it.second }?.first ?: createChild(folder, fileName)
         matches.filter { it.first != chosen }

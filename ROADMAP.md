@@ -35,7 +35,7 @@ app), Smriti's clients share **one schema contract** that must never drift.
   Android Firefox ──share/deeplink──▶ ┐
   Android audio   ──snip → whisper──▶ ├─ Android app ─┐
   Typed notes     ──────────────────▶ ┘               │
-                                                       ├─▶  Drive/nishparadox/smriti/snips/<device>.jsonl
+                                                       ├─▶  Drive/nishparadox/smriti/smarans/<device>.jsonl
   Desktop Firefox ──addon (native msg)─▶ macOS app  ──┤          (every client unions all *.jsonl at read time)
   Mic / meeting   ──whisper (endgame)──▶ macOS app  ──┘
 ```
@@ -54,13 +54,18 @@ receiver — reads and writes this exact shape.
 ### Storage layout
 
 ```
-My Drive/nishparadox/smriti/snips/<device>.jsonl
+My Drive/nishparadox/smriti/smarans/<device>.jsonl
 ```
 
 - **One file per device.** A device writes **only its own** file (single writer) and reads
   every other `*.jsonl` **read-only**, unioning them at read time (dedupe by `id`).
 - This is what makes it safe with no server and no locking: no two writers ever touch the
   same file, so there are no merge conflicts — only appends and read-time union.
+- **Local mirror:** each client keeps a `smarans.jsonl` in its own storage (the source of truth it
+  works from) and pushes it to its Drive file. Writes are **atomic** (temp → fsync → rename, with a
+  `.bak`) and reads are **line-tolerant** (a corrupt line is skipped, not fatal). The format is
+  line-per-record on purpose: it survives partial writes and stays swappable for a SQLite/FTS store
+  later, with any search index treated as a *derived, rebuildable* cache — never authoritative.
 
 ### Device id
 
@@ -149,7 +154,7 @@ Each step is independently shippable and verifiable on the Pixel.
 ### Step 1 — Schema refactor *(next)*
 - Add `SmaranType` enum + `metadata` to the record.
 - `toJson`/`fromJson`: serialize + tolerant parse + migrate existing records.
-- Verify on the Pixel that existing snips still read — **no data loss**.
+- Verify on the Pixel that existing smarans still read — **no data loss**.
 
 ### Step 2 — Manual notes + filters
 - `+` button on Recent → compose → save `type: NOTE` (reuses the detail-dialog editor).
