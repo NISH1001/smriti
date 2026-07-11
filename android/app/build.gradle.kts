@@ -13,8 +13,8 @@ android {
         applicationId = "com.nishparadox.smriti"
         minSdk = 34
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.3.0"
+        versionCode = 6
+        versionName = "0.4.0"
         ndk { abiFilters.add("arm64-v8a") }
         externalNativeBuild {
             cmake { arguments += listOf("-DGGML_OPENMP=OFF") }
@@ -34,6 +34,16 @@ android {
 
     buildTypes {
         debug { isMinifyEnabled = false }
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            // Debug-signed for now so release APKs install over existing debug builds (same key).
+            signingConfig = signingConfigs.getByName("debug")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
