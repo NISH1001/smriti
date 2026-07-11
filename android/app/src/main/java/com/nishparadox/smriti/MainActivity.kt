@@ -613,7 +613,7 @@ class MainActivity : ComponentActivity() {
                             if (driveConnected) {
                                 Text("Connected ✓", color = MaterialTheme.colorScheme.primary)
                                 driveFolder?.let { f ->
-                                    val path = if (f == "smriti") "smriti/snips/" else "$f/smriti/snips/"
+                                    val path = if (f == "smriti") "smriti/smarans/" else "$f/smriti/smarans/"
                                     Text(
                                         "📁 $path",
                                         color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp

@@ -28,9 +28,9 @@ class Settings(ctx: Context) {
         set(v) { p.edit().putString("driveRoot", v).apply() }
 
     /** Resolved-once document URIs, persisted so we never re-create (SAF is eventually consistent). */
-    var driveSnipsUri: String
-        get() = p.getString("driveSnipsUri", "")!!
-        set(v) { p.edit().putString("driveSnipsUri", v).apply() }
+    var driveSmaransUri: String
+        get() = p.getString("driveSmaransUri", "")!!
+        set(v) { p.edit().putString("driveSmaransUri", v).apply() }
 
     var driveFileUri: String
         get() = p.getString("driveFileUri", "")!!

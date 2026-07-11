@@ -2,14 +2,13 @@ package com.nishparadox.smriti.notes
 
 import android.content.Context
 import androidx.compose.runtime.mutableStateListOf
-import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
 
 /**
- * Single source of truth for snips. Backed by a Compose snapshot list (observed by the
- * UI) and persisted to a small JSON file. Safe to mutate from the capture service thread.
- * [onChanged] fires after local edits (not pulled merges) so Drive sync can rewrite our file.
+ * In-memory source of truth for smarans, mirroring the on-disk store ([SmaranStorage]). Backed by
+ * a Compose snapshot list (observed by the UI) and persisted through [storage] on every mutation.
+ * Safe to mutate from the capture service thread. [onChanged] fires after local edits (not pulled
+ * merges) so Drive sync can rewrite our file.
  */
 object SnipStore {
     /** Newest first. Read directly in composables; written from any thread. */
@@ -18,17 +17,15 @@ object SnipStore {
     /** Set by DriveSync; invoked after a local add/update/delete (not after a pulled merge). */
     @Volatile var onChanged: (() -> Unit)? = null
 
-    private var file: File? = null
+    private var storage: SmaranStorage? = null
     private const val MAX = 500
 
     @Synchronized fun ensureLoaded(ctx: Context) {
-        if (file != null) return
-        val f = File(ctx.applicationContext.filesDir, "snips.json")
-        file = f
-        if (f.exists()) runCatching {
-            val loaded = parse(f.readText())
-            snips.clear(); snips.addAll(loaded)
-        }
+        if (storage != null) return
+        val s = JsonlStorage(ctx.applicationContext.filesDir, "smarans.jsonl")
+        storage = s
+        val loaded = s.load()
+        snips.clear(); snips.addAll(loaded)
     }
 
     @Synchronized fun add(s: Snip) {
@@ -74,8 +71,8 @@ object SnipStore {
         snips.any { it.text == text && (it.metadata["url"] ?: "") == url }
 
     private fun persist() {
-        val f = file ?: return
-        runCatching { f.writeText(serialize(snips.toList())) }
+        val s = storage ?: return
+        runCatching { s.save(snips.toList()) }
     }
 
     fun toJson(s: Snip): JSONObject {
@@ -113,16 +110,5 @@ object SnipStore {
             device = o.optString("device", ""),
             metadata = metadata,
         )
-    }
-
-    private fun serialize(list: List<Snip>): String {
-        val arr = JSONArray()
-        for (s in list) arr.put(toJson(s))
-        return arr.toString()
-    }
-
-    private fun parse(json: String): List<Snip> {
-        val arr = JSONArray(json)
-        return (0 until arr.length()).map { fromJson(arr.getJSONObject(it)) }
     }
 }

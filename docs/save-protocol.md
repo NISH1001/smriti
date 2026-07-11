@@ -80,7 +80,7 @@ invisible to the user.
 Each saved note is a smaran of `type: "web"`, `status: "done"`, with `text`, `source`, and a
 `metadata` object holding `url` / `title` when provided (full record schema in
 [../ROADMAP.md](../ROADMAP.md)). It appears in the app's Recent list and syncs to
-`…/smriti/snips/<device>.jsonl`.
+`…/smriti/smarans/<device>.jsonl`.
 
 ## Caller sketch (Firefox addon)
 
