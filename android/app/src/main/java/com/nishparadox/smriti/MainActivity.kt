@@ -39,6 +39,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
@@ -53,7 +54,9 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
@@ -91,12 +94,14 @@ import androidx.core.graphics.drawable.toBitmap
 import androidx.documentfile.provider.DocumentFile
 import com.nishparadox.smriti.apps.AppWhitelist
 import com.nishparadox.smriti.capture.CaptureService
+import com.nishparadox.smriti.notes.DeviceId
 import com.nishparadox.smriti.notes.DriveSync
 import com.nishparadox.smriti.notes.SmaranType
 import com.nishparadox.smriti.notes.Snip
 import com.nishparadox.smriti.notes.SnipStatus
 import com.nishparadox.smriti.notes.SnipStore
 import com.nishparadox.smriti.settings.Settings
+import com.nishparadox.smriti.transcribe.ModelManager
 import com.nishparadox.smriti.trigger.FloatingBubbleService
 import com.nishparadox.smriti.ui.SmritiTheme
 import com.nishparadox.smriti.ui.ThemeMode
@@ -168,6 +173,10 @@ class MainActivity : ComponentActivity() {
                 var fromMonth by remember { mutableStateOf<YearMonth?>(null) }
                 var toMonth by remember { mutableStateOf<YearMonth?>(YearMonth.now()) }   // "To" defaults to current month
                 var datePickerFor by remember { mutableStateOf<String?>(null) }   // "from" | "to" | null
+                var audioEnabled by remember { mutableStateOf(settings.audioTranscription) }
+                var modelPct by remember { mutableStateOf<Int?>(null) }   // non-null = downloading %
+                var modelReady by remember { mutableStateOf(ModelManager.isPresent(this@MainActivity)) }
+                var showNewNote by remember { mutableStateOf(false) }
                 var driveConnected by remember { mutableStateOf(settings.driveRoot.isNotEmpty()) }
                 val driveFolder = remember(driveConnected) {
                     if (driveConnected) runCatching {
@@ -250,9 +259,29 @@ class MainActivity : ComponentActivity() {
                                         color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
                                     )
                                 }
+                                IconButton(onClick = { showNewNote = true }) {
+                                    Icon(Icons.Filled.Add, contentDescription = "New note")
+                                }
                                 IconButton(onClick = { screen = "settings" }) {
                                     Icon(Icons.Filled.Settings, contentDescription = "Settings")
                                 }
+                            }
+                            if (showNewNote) {
+                                NewNoteDialog(
+                                    onDismiss = { showNewNote = false },
+                                    onSave = { txt ->
+                                        val id = System.currentTimeMillis()
+                                        SnipStore.add(
+                                            Snip(
+                                                id = id, createdAt = id, status = SnipStatus.DONE,
+                                                type = SmaranType.NOTE, text = txt, source = "You",
+                                                device = DeviceId.of(this@MainActivity),
+                                            )
+                                        )
+                                        DriveSync.syncMine()
+                                        showNewNote = false
+                                    }
+                                )
                             }
                             if (running) {
                                 Spacer(Modifier.height(4.dp))
@@ -277,7 +306,10 @@ class MainActivity : ComponentActivity() {
                                     )
                                     Spacer(Modifier.height(8.dp))
                                     Text(
-                                        "Highlight on the web, share text, or tap ▶ to listen —\nyour smaran show up here.",
+                                        if (audioEnabled)
+                                            "Highlight on the web, share text, or tap ▶ to listen —\nyour smaran show up here."
+                                        else
+                                            "Highlight on the web or share text —\nyour smaran show up here.",
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         fontSize = 13.sp, lineHeight = 20.sp, textAlign = TextAlign.Center
                                     )
@@ -477,50 +509,99 @@ class MainActivity : ComponentActivity() {
                             }
                             Spacer(Modifier.height(16.dp))
 
-                            Text("Audio Capture", fontSize = 16.sp)
+                            Text("Audio transcription", fontSize = 16.sp)
                             Text(
-                                "How much audio each snip keeps.",
+                                "Capture audio you're playing and transcribe it on-device. Downloads a ~31 MB model the first time you enable it.",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
                             )
-                            Spacer(Modifier.height(8.dp))
-                            Text("Pre-roll (N): ${pre.toInt()} s")
-                            Slider(
-                                value = pre, onValueChange = { pre = it },
-                                valueRange = 1f..15f, steps = 13   // snap to whole seconds
-                            )
-                            Text("Total clip (K): ${tot.toInt()} s")
-                            Slider(
-                                value = tot,
-                                onValueChange = { tot = it.coerceAtLeast(pre + 1f) },
-                                valueRange = 5f..60f, steps = 54    // snap to whole seconds
-                            )
-                            Spacer(Modifier.height(20.dp))
-
-                            Text("Watched apps", fontSize = 16.sp)
-                            Text(
-                                "Snips only capture audio from these apps.",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            if (selected.isEmpty()) {
-                                Text("None selected yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            } else {
-                                selected.toList().forEach { pkg ->
-                                    Row(
-                                        Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        AppIcon(pkg, 36)
-                                        Spacer(Modifier.width(12.dp))
-                                        Text(labelOf(this@MainActivity, pkg), Modifier.weight(1f))
-                                        IconButton(onClick = { selected.remove(pkg) }) {
-                                            Icon(Icons.Filled.Close, contentDescription = "Remove")
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text("Enable", Modifier.weight(1f))
+                                Switch(
+                                    checked = audioEnabled,
+                                    enabled = modelPct == null,   // lock while downloading
+                                    onCheckedChange = { on ->
+                                        audioEnabled = on
+                                        settings.audioTranscription = on
+                                        if (on && !modelReady) {
+                                            modelPct = 0
+                                            scope.launch {
+                                                val ok = ModelManager.download(this@MainActivity) { p -> modelPct = p }
+                                                modelPct = null
+                                                if (ok) {
+                                                    modelReady = true
+                                                    snackbar.showSnackbar("Transcription model ready")
+                                                } else {
+                                                    audioEnabled = false
+                                                    settings.audioTranscription = false
+                                                    snackbar.showSnackbar("Model download failed — check connection")
+                                                }
+                                            }
                                         }
+                                    }
+                                )
+                            }
+                            if (audioEnabled) {
+                                val pct = modelPct
+                                if (pct != null) {
+                                    Spacer(Modifier.height(6.dp))
+                                    Text("Downloading model… $pct%", color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
+                                    Spacer(Modifier.height(4.dp))
+                                    LinearProgressIndicator(progress = { pct / 100f }, modifier = Modifier.fillMaxWidth())
+                                } else if (modelReady) {
+                                    Spacer(Modifier.height(6.dp))
+                                    Text("✓ Model ready", color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
+                                    Spacer(Modifier.height(12.dp))
+                                    Text("Pre-roll (N): ${pre.toInt()} s")
+                                    Slider(
+                                        value = pre, onValueChange = { pre = it },
+                                        valueRange = 1f..15f, steps = 13   // snap to whole seconds
+                                    )
+                                    Text("Total clip (K): ${tot.toInt()} s")
+                                    Slider(
+                                        value = tot,
+                                        onValueChange = { tot = it.coerceAtLeast(pre + 1f) },
+                                        valueRange = 5f..60f, steps = 54    // snap to whole seconds
+                                    )
+                                    Spacer(Modifier.height(16.dp))
+                                    Text("Watched apps", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                                    Text(
+                                        "Snips only capture audio from these apps.",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    if (selected.isEmpty()) {
+                                        Text("None selected yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    } else {
+                                        selected.toList().forEach { pkg ->
+                                            Row(
+                                                Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                AppIcon(pkg, 36)
+                                                Spacer(Modifier.width(12.dp))
+                                                Text(labelOf(this@MainActivity, pkg), Modifier.weight(1f))
+                                                IconButton(onClick = { selected.remove(pkg) }) {
+                                                    Icon(Icons.Filled.Close, contentDescription = "Remove")
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Spacer(Modifier.height(8.dp))
+                                    OutlinedButton(onClick = { showPicker = true }) { Text("＋  Choose apps") }
+                                    Spacer(Modifier.height(8.dp))
+                                    TextButton(onClick = {
+                                        ModelManager.delete(this@MainActivity)
+                                        modelReady = false
+                                        audioEnabled = false
+                                        settings.audioTranscription = false
+                                    }) {
+                                        Text(
+                                            "Delete model · free 31 MB",
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp
+                                        )
                                     }
                                 }
                             }
-                            Spacer(Modifier.height(8.dp))
-                            OutlinedButton(onClick = { showPicker = true }) { Text("＋  Choose apps") }
 
                             Spacer(Modifier.height(24.dp))
                             Text("Google Drive sync", fontSize = 16.sp)
@@ -589,7 +670,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 SnackbarHost(hostState = snackbar, modifier = Modifier.align(Alignment.BottomCenter))
-                if (screen == "main" && snackbar.currentSnackbarData == null) {
+                if (screen == "main" && audioEnabled && snackbar.currentSnackbarData == null) {
                     val active = running
                     FloatingActionButton(
                         onClick = {
@@ -827,6 +908,32 @@ private fun SnipDetailDialog(snip: Snip, onDismiss: () -> Unit, onDelete: () -> 
                         }
                         onDismiss()
                     }) { Text("Save") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NewNoteDialog(onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    var text by remember { mutableStateOf("") }
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface) {
+            Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                Text("New note", fontSize = 16.sp)
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 300.dp),
+                    placeholder = { Text("Write a smaran…") }
+                )
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                    Spacer(Modifier.width(4.dp))
+                    Button(onClick = { onSave(text.trim()) }, enabled = text.isNotBlank()) { Text("Save") }
                 }
             }
         }

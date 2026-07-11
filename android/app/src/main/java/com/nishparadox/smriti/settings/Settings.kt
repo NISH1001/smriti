@@ -36,6 +36,11 @@ class Settings(ctx: Context) {
         get() = p.getString("driveFileUri", "")!!
         set(v) { p.edit().putString("driveFileUri", v).apply() }
 
+    /** Audio transcription is opt-in (downloads the Whisper model). Off = no sliders, no Listen FAB. */
+    var audioTranscription: Boolean
+        get() = p.getBoolean("audioTranscription", false)
+        set(v) { p.edit().putBoolean("audioTranscription", v).apply() }
+
     /** Which fields the Recent list shows per row (the note text is always shown). */
     var listFields: Set<String>
         get() = p.getStringSet("listFields", DEFAULT_LIST_FIELDS)!!

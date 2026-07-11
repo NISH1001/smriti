@@ -27,6 +27,7 @@ import com.nishparadox.smriti.notes.SnipStatus
 import com.nishparadox.smriti.notes.SnipStore
 import com.nishparadox.smriti.output.NotificationOutput
 import com.nishparadox.smriti.settings.Settings
+import com.nishparadox.smriti.transcribe.ModelManager
 import com.nishparadox.smriti.transcribe.WhisperTranscriber
 import com.nishparadox.smriti.trigger.FloatingBubbleService
 import com.nishparadox.smriti.trigger.SnipEntryPoint
@@ -49,7 +50,6 @@ class CaptureService : Service(), SnipEntryPoint {
         @Volatile var onSnipState: ((Boolean) -> Unit)? = null
         /** Set by MainActivity to keep its Start/Stop button in sync with the actual session. */
         @Volatile var onRunningChanged: ((Boolean) -> Unit)? = null
-        const val MODEL_ASSET = "models/ggml-tiny.en-q5_1.bin"
         const val TAG = "SMRITI"
         const val ACTION_STOP = "com.nishparadox.smriti.STOP"
     }
@@ -244,13 +244,12 @@ class CaptureService : Service(), SnipEntryPoint {
 
     private fun ensureTranscriber(): WhisperTranscriber? {
         transcriber?.let { return it }
+        val modelFile = ModelManager.modelFile(this)
+        if (!modelFile.exists()) {
+            Log.w(TAG, "transcription model not downloaded — enable Audio transcription in Settings")
+            return null
+        }
         return try {
-            val modelFile = File(filesDir, "ggml-tiny.en-q5_1.bin")
-            if (!modelFile.exists()) {
-                assets.open(MODEL_ASSET).use { input ->
-                    modelFile.outputStream().use { input.copyTo(it) }
-                }
-            }
             WhisperTranscriber(modelFile.absolutePath).also { transcriber = it }
         } catch (e: Exception) {
             Log.e(TAG, "transcriber init failed", e); null
