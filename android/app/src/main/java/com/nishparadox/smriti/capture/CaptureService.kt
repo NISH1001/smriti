@@ -114,7 +114,9 @@ class CaptureService : Service(), SnipEntryPoint {
         @Suppress("DEPRECATION")
         val data = intent.getParcelableExtra<Intent>("data")
         if (data == null) { stopSelf(); return START_NOT_STICKY }
-        projection = mpm.getMediaProjection(code, data).apply {
+        val proj = mpm.getMediaProjection(code, data)   // @Nullable as of compileSdk 36
+        if (proj == null) { stopSelf(); return START_NOT_STICKY }
+        projection = proj.apply {
             registerCallback(object : MediaProjection.Callback() {
                 override fun onStop() { running.set(false); stopSelf() }
             }, main)

@@ -1,7 +1,10 @@
 package com.nishparadox.smriti.notes
 
 import android.content.Context
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.setValue
 import org.json.JSONObject
 
 /**
@@ -16,6 +19,11 @@ object SnipStore {
 
     /** Set by DriveSync; invoked after a local add/update/delete (not after a pulled merge). */
     @Volatile var onChanged: (() -> Unit)? = null
+
+    /** Bumped on every change to [snips] so derived caches (e.g. the search index) rebuild lazily.
+     *  Compose-observable (like [snips]) so anything keyed on it recomposes on any change. */
+    var version by mutableIntStateOf(0)
+        private set
 
     private var storage: SmaranStorage? = null
     private const val MAX = 500
@@ -71,6 +79,7 @@ object SnipStore {
         snips.any { it.text == text && (it.metadata["url"] ?: "") == url }
 
     private fun persist() {
+        version++                       // called only on real mutations → exact rebuild signal
         val s = storage ?: return
         runCatching { s.save(snips.toList()) }
     }
