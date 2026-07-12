@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -101,6 +102,10 @@ import com.nishparadox.smriti.notes.SmaranType
 import com.nishparadox.smriti.notes.Snip
 import com.nishparadox.smriti.notes.SnipStatus
 import com.nishparadox.smriti.notes.SnipStore
+import com.nishparadox.smriti.github.GitHubApi
+import com.nishparadox.smriti.github.GitHubConnection
+import com.nishparadox.smriti.github.GitHubSource
+import com.nishparadox.smriti.search.ExternalHit
 import com.nishparadox.smriti.search.SearchIndex
 import com.nishparadox.smriti.settings.Settings
 import com.nishparadox.smriti.transcribe.ModelManager
@@ -115,6 +120,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -141,11 +147,24 @@ class MainActivity : ComponentActivity() {
                 }
                 val snackbar = remember { SnackbarHostState() }
                 val scope = rememberCoroutineScope()
+                val ghConn = remember { GitHubConnection(this@MainActivity) }
+                val ghSource = remember { GitHubSource(ghConn) }
+                // Batch-undo: rapid swipes collapse into ONE snackbar with a running count, and Undo
+                // restores the whole batch — instead of a queue of "Deleted" toasts firing one by one.
+                val pendingDeletes = remember { mutableStateListOf<Snip>() }
+                var undoJob by remember { mutableStateOf<Job?>(null) }
                 fun deleteWithUndo(snip: Snip) {
                     SnipStore.delete(snip.id)
-                    scope.launch {
-                        val r = snackbar.showSnackbar("Deleted", actionLabel = "Undo", duration = SnackbarDuration.Short)
-                        if (r == SnackbarResult.ActionPerformed) SnipStore.restore(snip)
+                    pendingDeletes.add(snip)
+                    undoJob?.cancel()   // dismiss the current snackbar so the next replaces (not queues) it
+                    undoJob = scope.launch {
+                        val n = pendingDeletes.size
+                        val r = snackbar.showSnackbar(
+                            if (n == 1) "Deleted" else "$n deleted",
+                            actionLabel = "Undo", duration = SnackbarDuration.Short
+                        )
+                        if (r == SnackbarResult.ActionPerformed) pendingDeletes.forEach { SnipStore.restore(it) }
+                        pendingDeletes.clear()   // only the final (uncancelled) job commits the batch
                     }
                 }
                 fun checkForUpdates(silent: Boolean) {
@@ -175,6 +194,10 @@ class MainActivity : ComponentActivity() {
                 var typeFilter by remember { mutableStateOf<SmaranType?>(null) }
                 var fromMonth by remember { mutableStateOf<YearMonth?>(null) }
                 var toMonth by remember { mutableStateOf<YearMonth?>(YearMonth.now()) }   // "To" defaults to current month
+                var externalHits by remember { mutableStateOf<List<ExternalHit>?>(null) }
+                var externalLoading by remember { mutableStateOf(false) }
+                var externalDetail by remember { mutableStateOf<ExternalHit?>(null) }
+                LaunchedEffect(query) { externalHits = null; externalLoading = false }   // reset on new query
                 var datePickerFor by remember { mutableStateOf<String?>(null) }   // "from" | "to" | null
                 var audioEnabled by remember { mutableStateOf(settings.audioTranscription) }
                 var modelPct by remember { mutableStateOf<Int?>(null) }   // non-null = downloading %
@@ -297,7 +320,7 @@ class MainActivity : ComponentActivity() {
                             Spacer(Modifier.height(16.dp))
                             HorizontalDivider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f))
 
-                            if (SnipStore.snips.isEmpty()) {
+                            if (SnipStore.snips.isEmpty() && !ghSource.isEnabled) {
                                 Column(
                                     Modifier.weight(1f).fillMaxWidth(),
                                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -424,7 +447,7 @@ class MainActivity : ComponentActivity() {
                                     val byId = SnipStore.snips.associateBy { it.id }
                                     rankedIds.mapNotNull { byId[it] }.filter(passesFilters)  // best match first
                                 }
-                                if (filtered.isEmpty()) {
+                                if (filtered.isEmpty() && query.isNotBlank()) {
                                     Text(
                                         "No matches",
                                         color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
@@ -477,6 +500,42 @@ class MainActivity : ComponentActivity() {
                                             )
                                         }
                                     }
+                                    // External search (opt-in, on-demand): appended BELOW your own
+                                    // smarans — different ranking + timing, so never interleaved.
+                                    if (query.isNotBlank() && ghSource.isEnabled) {
+                                        val hits = externalHits
+                                        when {
+                                            hits == null -> item {
+                                                TextButton(
+                                                    enabled = !externalLoading,
+                                                    onClick = {
+                                                        externalLoading = true
+                                                        scope.launch {
+                                                            externalHits = ghSource.search(query.trim())
+                                                            externalLoading = false
+                                                        }
+                                                    }
+                                                ) {
+                                                    Text(
+                                                        if (externalLoading) "Searching ${ghSource.label}…"
+                                                        else "🌐  more smarans in ${ghSource.label}  →",
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                }
+                                            }
+                                            hits.isEmpty() -> item {
+                                                Text(
+                                                    "No matches in ${ghSource.label}",
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    fontSize = 13.sp,
+                                                    modifier = Modifier.padding(12.dp)
+                                                )
+                                            }
+                                            else -> items(hits) { hit ->
+                                                ExternalHitRow(hit, onOpen = { externalDetail = hit })
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -486,6 +545,9 @@ class MainActivity : ComponentActivity() {
                                 onDismiss = { detailSnip = null },
                                 onDelete = { deleteWithUndo(s); detailSnip = null }
                             )
+                        }
+                        externalDetail?.let { h ->
+                            ExternalHitDialog(hit = h, token = ghConn.token, onDismiss = { externalDetail = null })
                         }
                     } else {
                         Column(
@@ -503,6 +565,8 @@ class MainActivity : ComponentActivity() {
                             }
                             Spacer(Modifier.height(8.dp))
 
+                            Text("Appearance", color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
+                            Spacer(Modifier.height(8.dp))
                             Text("Theme", color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Row {
                                 listOf(ThemeMode.SYSTEM, ThemeMode.DARK, ThemeMode.LIGHT).forEach { m ->
@@ -518,7 +582,28 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                             Spacer(Modifier.height(16.dp))
+                            Text("List display", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                "Fields shown per note in the list.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Settings.LIST_FIELDS.forEach { (key, label) ->
+                                    FilterChip(
+                                        selected = key in listFields,
+                                        onClick = {
+                                            if (key in listFields) listFields.remove(key) else listFields.add(key)
+                                            settings.listFields = listFields.toSet()
+                                        },
+                                        label = { Text(label) }
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(24.dp))
 
+                            Text("Capture", color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
+                            Spacer(Modifier.height(8.dp))
                             Text("Audio transcription", fontSize = 16.sp)
                             Text(
                                 "Capture audio you're playing and transcribe it on-device. Downloads a ~31 MB model the first time you enable it.",
@@ -614,7 +699,9 @@ class MainActivity : ComponentActivity() {
                             }
 
                             Spacer(Modifier.height(24.dp))
-                            Text("Google Drive sync", fontSize = 16.sp)
+                            Text("Storage & sync", color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
+                            Spacer(Modifier.height(8.dp))
+                            Text("Google Drive", fontSize = 16.sp)
                             Text(
                                 "Notes sync as plain files to a Drive folder — no account or API. Pick any folder once; Smriti makes its own smriti/ subfolder inside it.",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
@@ -644,27 +731,41 @@ class MainActivity : ComponentActivity() {
                             }
 
                             Spacer(Modifier.height(24.dp))
-                            Text("List display", fontSize = 16.sp)
+                            Text("External connectors", color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
+                            Spacer(Modifier.height(8.dp))
+                            Text("GitHub", fontSize = 16.sp)
                             Text(
-                                "Fields shown per note in the list.",
+                                "Search your synced Logseq / markdown repos from here. Read-only — nothing is copied into Smriti. Optional, off by default.",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
                             )
                             Spacer(Modifier.height(8.dp))
-                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Settings.LIST_FIELDS.forEach { (key, label) ->
-                                    FilterChip(
-                                        selected = key in listFields,
-                                        onClick = {
-                                            if (key in listFields) listFields.remove(key) else listFields.add(key)
-                                            settings.listFields = listFields.toSet()
-                                        },
-                                        label = { Text(label) }
-                                    )
+                            var ghConnected by remember { mutableStateOf(ghConn.isConnected) }
+                            var showGhDialog by remember { mutableStateOf(false) }
+                            if (ghConnected) {
+                                Text("Connected as ${ghConn.account} ✓", color = MaterialTheme.colorScheme.primary)
+                                ghConn.repos.forEach { repo ->
+                                    Text("• $repo", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                                 }
+                                Spacer(Modifier.height(6.dp))
+                                Row {
+                                    OutlinedButton(
+                                        onClick = { showGhDialog = true }, modifier = Modifier.padding(end = 8.dp)
+                                    ) { Text("Edit repos") }
+                                    OutlinedButton(onClick = { ghConn.disconnect(); ghConnected = false }) { Text("Disconnect") }
+                                }
+                            } else {
+                                Button(onClick = { showGhDialog = true }) { Text("Connect GitHub") }
+                            }
+                            if (showGhDialog) {
+                                GitHubConnectDialog(
+                                    conn = ghConn,
+                                    onDone = { ghConnected = ghConn.isConnected; showGhDialog = false },
+                                    onDismiss = { showGhDialog = false }
+                                )
                             }
 
                             Spacer(Modifier.height(24.dp))
-                            Text("About", fontSize = 16.sp)
+                            Text("About", color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
                             Text(
                                 "Smriti v$appVersion",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
@@ -1003,6 +1104,173 @@ private fun MonthYearPickerDialog(
                 }
                 if (allowAny) {
                     TextButton(onClick = { onPick(null) }, modifier = Modifier.align(Alignment.End)) { Text("Any month") }
+                }
+            }
+        }
+    }
+}
+
+/** A found-not-owned external result: read-only, tap opens the source, source badge + ↗, no swipe. */
+@Composable
+private fun ExternalHitRow(hit: ExternalHit, onOpen: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(vertical = 10.dp)
+    ) {
+        Text(hit.title, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (hit.snippet.isNotBlank() && hit.snippet != hit.title) {
+            Text(
+                hit.snippet, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis
+            )
+        }
+        Text("🌐 ${hit.sourceLabel} ↗", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
+    }
+}
+
+/** Connect flow: paste token → verify (GitHub /user) → pick repos → save. */
+@Composable
+private fun GitHubConnectDialog(conn: GitHubConnection, onDone: () -> Unit, onDismiss: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var token by remember { mutableStateOf(conn.token ?: "") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var account by remember { mutableStateOf(conn.account) }
+    var repos by remember { mutableStateOf<List<GitHubApi.Repo>>(emptyList()) }
+    var page by remember { mutableStateOf(1) }
+    var hasMore by remember { mutableStateOf(false) }
+    var loadingMore by remember { mutableStateOf(false) }
+    val selected = remember { mutableStateListOf<String>().apply { addAll(conn.repos) } }
+
+    // Edit mode (already connected): pre-fetch the repo list so the checklist shows.
+    LaunchedEffect(Unit) {
+        if (account != null && token.isNotBlank() && repos.isEmpty()) {
+            repos = GitHubApi.listRepos(token.trim(), 1); hasMore = repos.size == 100
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(shape = MaterialTheme.shapes.large, tonalElevation = 4.dp) {
+            Column(Modifier.padding(20.dp).width(320.dp)) {
+                Text("Connect GitHub", fontSize = 18.sp)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Paste a personal access token with read access to the repos you want to search. Stored encrypted on-device; never synced.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = token, onValueChange = { token = it },
+                    label = { Text("Token") }, singleLine = true, modifier = Modifier.fillMaxWidth()
+                )
+                error?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                }
+                if (account == null) {
+                    Spacer(Modifier.height(12.dp))
+                    Button(
+                        enabled = token.isNotBlank() && !busy,
+                        onClick = {
+                            busy = true; error = null
+                            scope.launch {
+                                val login = GitHubApi.verify(token.trim())
+                                if (login == null) { error = "Invalid token, or no access"; busy = false }
+                                else {
+                                    account = login
+                                    repos = GitHubApi.listRepos(token.trim(), 1); hasMore = repos.size == 100
+                                    busy = false
+                                }
+                            }
+                        }
+                    ) { Text(if (busy) "Verifying…" else "Verify") }
+                } else {
+                    Spacer(Modifier.height(10.dp))
+                    Text("Connected as $account — pick repos to search:", fontSize = 13.sp)
+                    var repoFilter by remember { mutableStateOf("") }
+                    OutlinedTextField(
+                        value = repoFilter, onValueChange = { repoFilter = it },
+                        label = { Text("Filter (e.g. logseq)") }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
+                    )
+                    // Your OWN repos first (affiliation=owner → no org/collab noise); "Load more" pages.
+                    val shown = repos.filter { it.fullName.contains(repoFilter, ignoreCase = true) }
+                    LazyColumn(Modifier.heightIn(max = 260.dp)) {
+                        items(shown) { r ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    if (r.fullName in selected) selected.remove(r.fullName) else selected.add(r.fullName)
+                                }
+                            ) {
+                                Checkbox(
+                                    checked = r.fullName in selected,
+                                    onCheckedChange = {
+                                        if (r.fullName in selected) selected.remove(r.fullName) else selected.add(r.fullName)
+                                    }
+                                )
+                                Text(r.fullName + if (r.private) "  🔒" else "", fontSize = 13.sp)
+                            }
+                        }
+                        if (hasMore) {
+                            item {
+                                TextButton(
+                                    enabled = !loadingMore,
+                                    onClick = {
+                                        loadingMore = true
+                                        scope.launch {
+                                            val next = GitHubApi.listRepos(token.trim(), page + 1)
+                                            repos = repos + next; page += 1
+                                            hasMore = next.size == 100; loadingMore = false
+                                        }
+                                    }
+                                ) { Text(if (loadingMore) "Loading…" else "Load more…") }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        enabled = selected.isNotEmpty(),
+                        onClick = {
+                            conn.token = token.trim(); conn.account = account; conn.repos = selected.toSet(); onDone()
+                        }
+                    ) { Text("Save (${selected.size})") }
+                }
+                Spacer(Modifier.height(8.dp))
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        }
+    }
+}
+
+/** Read-only in-app view of an external hit's file, fetched token-authed (so private repos work). */
+@Composable
+private fun ExternalHitDialog(hit: ExternalHit, token: String?, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    var content by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(true) }
+    LaunchedEffect(hit) {
+        content = if (token == null) null else GitHubApi.fetchFile(token, hit.repoFullName, hit.path)
+        loading = false
+    }
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(shape = MaterialTheme.shapes.large, tonalElevation = 4.dp) {
+            Column(Modifier.padding(20.dp).width(340.dp)) {
+                Text(hit.title, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("🌐 ${hit.sourceLabel} · read-only", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
+                Spacer(Modifier.height(10.dp))
+                Box(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
+                    when {
+                        loading -> Text("Loading…", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                        content == null -> Text("Couldn't load content.", color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+                        else -> SelectionContainer { Text(content!!, fontSize = 13.sp, lineHeight = 19.sp) }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = {
+                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(hit.url))) }
+                    }) { Text("Open in browser") }
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = onDismiss) { Text("Close") }
                 }
             }
         }

@@ -5,7 +5,11 @@ architecture, the smaran schema contract, and the build order; **README.md** for
 
 ## Git workflow (IMPORTANT)
 
-- **Never commit directly to `main`.** Always work on a feature branch (`feat/…`, `fix/…`).
+- **Never commit directly to `main`.** Always work on a **client-namespaced** branch:
+  `<client>/<type>/<name>` — e.g. `android/feat/github-connector`, `android/fix/…`,
+  `firefox/feat/…`, `macos/feat/…`. This mirrors the release-tag namespacing (branches live in
+  `refs/heads/android/…`, tags in `refs/tags/android/v…` — separate namespaces, no collision).
+  Repo-wide changes (ROADMAP, tooling, cross-client) use `repo/feat/…`.
 - **Never open a PR or merge without explicit approval — ask every time.** The flow is:
 
   branch → implement → **verify on the connected Pixel** → *wait for the user* →
