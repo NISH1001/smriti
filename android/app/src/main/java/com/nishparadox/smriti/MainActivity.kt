@@ -36,6 +36,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -87,6 +89,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -106,6 +110,9 @@ import com.nishparadox.smriti.github.GitHubApi
 import com.nishparadox.smriti.github.GitHubConnection
 import com.nishparadox.smriti.github.GitHubSource
 import com.nishparadox.smriti.search.ExternalHit
+import com.nishparadox.smriti.rag.LlamaModelManager
+import com.nishparadox.smriti.rag.RagGenerator
+import com.nishparadox.smriti.rag.RagModel
 import com.nishparadox.smriti.search.SearchIndex
 import com.nishparadox.smriti.settings.Settings
 import com.nishparadox.smriti.transcribe.ModelManager
@@ -120,10 +127,18 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    // Release the RAG model (~1 GB at 1B) when the app is backgrounded or the system reclaims RAM;
+    // the .gguf stays on disk, so the next answer just reloads. Process death frees it regardless.
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) RagGenerator.unload()
+    }
+
     @OptIn(ExperimentalLayoutApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -149,6 +164,8 @@ class MainActivity : ComponentActivity() {
                 val scope = rememberCoroutineScope()
                 val ghConn = remember { GitHubConnection(this@MainActivity) }
                 val ghSource = remember { GitHubSource(ghConn) }
+                var ragEnabled by remember { mutableStateOf(settings.ragEnabled) }
+                var ragAuto by remember { mutableStateOf(settings.ragAuto) }
                 // Batch-undo: rapid swipes collapse into ONE snackbar with a running count, and Undo
                 // restores the whole batch — instead of a queue of "Deleted" toasts firing one by one.
                 val pendingDeletes = remember { mutableStateListOf<Snip>() }
@@ -197,6 +214,72 @@ class MainActivity : ComponentActivity() {
                 var externalHits by remember { mutableStateOf<List<ExternalHit>?>(null) }
                 var externalLoading by remember { mutableStateOf(false) }
                 var externalDetail by remember { mutableStateOf<ExternalHit?>(null) }
+                // RAG: answer streams in on search-submit (not per keystroke) over the top-N local hits.
+                var answer by remember { mutableStateOf<String?>(null) }
+                var answering by remember { mutableStateOf(false) }
+                var retrieving by remember { mutableStateOf(false) }
+                var answerSources by remember { mutableStateOf<List<Snip>>(emptyList()) }
+                var answerExtLabels by remember { mutableStateOf<List<String>>(emptyList()) }
+                var genJob by remember { mutableStateOf<Job?>(null) }
+                // Editing the query clears/stops any answer (it's for the previous query).
+                LaunchedEffect(query) {
+                    genJob?.cancel(); answering = false; retrieving = false
+                    answer = null; answerSources = emptyList(); answerExtLabels = emptyList()
+                }
+                fun answerNow() {
+                    val q = query.trim()
+                    if (q.isBlank() || !ragEnabled) return
+                    val model = RagModel.byId(settings.ragModel)
+                    if (!LlamaModelManager.isPresent(this@MainActivity, model)) {
+                        answerSources = emptyList(); answerExtLabels = emptyList()
+                        answer = "Download a model in Settings → RAG to get answers."
+                        return
+                    }
+                    genJob?.cancel()
+                    // "retrieving" only when there's external content to fetch over the network;
+                    // local notes are already found (they're the on-screen results).
+                    // External context is ONLY the Logseq hits already surfaced on-screen (via the
+                    // "more smarans in Logseq" action) — never a hidden re-query. Notes-first, then answer.
+                    val shownExt = externalHits ?: emptyList()
+                    answering = true; retrieving = shownExt.isNotEmpty(); answer = ""; answerSources = emptyList(); answerExtLabels = emptyList()
+                    genJob = scope.launch {
+                        try {
+                            // Context = top-N local smarans + top-N of the external hits already shown.
+                            val byId = SnipStore.snips.associateBy { it.id }
+                            val localSources = (SearchIndex.search(q) ?: emptyList()).mapNotNull { byId[it] }.take(settings.ragTopN)
+                            val extHits = shownExt.take(settings.ragTopN)
+                            answerSources = localSources
+                            answerExtLabels = extHits.map { it.title }
+                            if (localSources.isEmpty() && extHits.isEmpty()) {
+                                answer = "No matching notes to answer from."
+                                return@launch
+                            }
+                            // Full note bodies, cleaned by each source's own preprocessor (Logseq
+                            // metadata stripped) — a snippet alone is often just the path. The 12k cap
+                            // is only a memory guard; the real fit to the model's context window is
+                            // done at the token level, natively in startGen.
+                            val extParts = extHits.map { hit ->
+                                val body = runCatching { ghSource.content(hit) }.getOrNull()?.ifBlank { null }
+                                "- ${hit.title}:\n${(body ?: hit.snippet).trim().take(12000)}"
+                            }
+                            val parts = localSources.map { "- ${it.text.trim().take(12000)}" } + extParts
+                            retrieving = false   // notes fully gathered → only now start generating
+                            RagGenerator.generate(
+                                LlamaModelManager.modelFile(this@MainActivity, model).absolutePath,
+                                settings.ragPrompt,
+                                "Notes:\n${parts.joinToString("\n\n")}\n\nUsing the notes above, answer this question: $q",
+                                nCtx = settings.ragCtx,
+                            ).collect { answer = (answer ?: "") + it }
+                            if (answer.isNullOrBlank()) answer = "The model couldn't find an answer in these notes."
+                        } catch (_: CancellationException) {
+                            // stopped by the user
+                        } catch (_: Exception) {
+                            answer = (answer ?: "") + "\n\n(couldn't generate an answer)"
+                        } finally {
+                            answering = false; retrieving = false
+                        }
+                    }
+                }
                 LaunchedEffect(query) { externalHits = null; externalLoading = false }   // reset on new query
                 var datePickerFor by remember { mutableStateOf<String?>(null) }   // "from" | "to" | null
                 var audioEnabled by remember { mutableStateOf(settings.audioTranscription) }
@@ -366,7 +449,9 @@ class MainActivity : ComponentActivity() {
                                         modifier = Modifier.fillMaxWidth(),
                                         placeholder = { Text("Search smaran") },
                                         leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                                        singleLine = true
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                        keyboardActions = KeyboardActions(onSearch = { if (ragAuto && ragEnabled) answerNow() }),
                                     )
                                     Spacer(Modifier.height(8.dp))
                                     Row(
@@ -438,7 +523,7 @@ class MainActivity : ComponentActivity() {
                                 // BM25F ranking via AppSearch (async). null = no searchable query →
                                 // keep newest-first. Re-runs on a query change or store change (version).
                                 val ranked by produceState<List<Long>?>(null, query, SnipStore.version) {
-                                    value = if (query.isBlank()) null else SearchIndex.search(query)
+                                    value = if (query.isBlank()) null else SearchIndex.search(query.trim())
                                 }
                                 val rankedIds = ranked   // local val: delegated property can't smart-cast
                                 val filtered = if (rankedIds == null) {
@@ -454,6 +539,49 @@ class MainActivity : ComponentActivity() {
                                     )
                                 }
                                 LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+                                    // ✨ Answer card — above the results, which stay fully intact below.
+                                    if (ragEnabled && query.isNotBlank() && (!ragAuto || answering || answer != null)) {
+                                        item {
+                                            Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                                                if (answer == null && !answering) {
+                                                    OutlinedButton(onClick = { answerNow() }) { Text("✨ Answer from your notes") }
+                                                } else {
+                                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                                        Text(
+                                                            when {
+                                                                retrieving -> "✨ Answer · reading ${ghSource.label}…"
+                                                                answering -> "✨ Answer · generating…"
+                                                                else -> "✨ Answer"
+                                                            },
+                                                            color = MaterialTheme.colorScheme.primary, fontSize = 13.sp,
+                                                            modifier = Modifier.weight(1f)
+                                                        )
+                                                        if (answering) {
+                                                            TextButton(onClick = { genJob?.cancel(); answering = false }) { Text("Stop") }
+                                                        }
+                                                    }
+                                                    Spacer(Modifier.height(4.dp))
+                                                    SelectionContainer { Text(answer.orEmpty(), fontSize = 14.sp, lineHeight = 20.sp) }
+                                                    val srcLabels = answerSources.map { s ->
+                                                        s.metadata["title"]?.takeIf { it.isNotBlank() }
+                                                            ?: s.source.takeIf { it.isNotBlank() }
+                                                            ?: s.text.take(20)
+                                                    } + answerExtLabels
+                                                    if (srcLabels.isNotEmpty()) {
+                                                        Spacer(Modifier.height(6.dp))
+                                                        Text(
+                                                            "Sources: " + srcLabels.joinToString(" · "),
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp
+                                                        )
+                                                    }
+                                                }
+                                                HorizontalDivider(
+                                                    Modifier.padding(top = 10.dp),
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f)
+                                                )
+                                            }
+                                        }
+                                    }
                                     items(filtered, key = { it.id }) { snip ->
                                         val selectionMode = selectedIds.isNotEmpty()
                                         val dismiss = rememberSwipeToDismissBoxState(
@@ -761,6 +889,98 @@ class MainActivity : ComponentActivity() {
                                     conn = ghConn,
                                     onDone = { ghConnected = ghConn.isConnected; showGhDialog = false },
                                     onDismiss = { showGhDialog = false }
+                                )
+                            }
+
+                            Spacer(Modifier.height(24.dp))
+                            Text("RAG", color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
+                            Spacer(Modifier.height(8.dp))
+                            Text("On-device answers", fontSize = 16.sp)
+                            Text(
+                                "Synthesize an answer from your top matches, fully on-device. Off by default; enabling downloads a small model (~150–250 MB).",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text("Enable", Modifier.weight(1f))
+                                Switch(checked = ragEnabled, onCheckedChange = { ragEnabled = it; settings.ragEnabled = it })
+                            }
+                            if (ragEnabled) {
+                                var ragModelSel by remember { mutableStateOf(settings.ragModel) }
+                                val selModel = RagModel.byId(ragModelSel)
+                                var present by remember(ragModelSel) { mutableStateOf(LlamaModelManager.isPresent(this@MainActivity, selModel)) }
+                                var dlPct by remember(ragModelSel) { mutableStateOf(-1) }
+                                Spacer(Modifier.height(8.dp))
+                                Text("Model", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    RagModel.entries.forEach { m ->
+                                        FilterChip(
+                                            selected = ragModelSel == m.id,
+                                            onClick = { ragModelSel = m.id; settings.ragModel = m.id },
+                                            label = { Text(m.label) }
+                                        )
+                                    }
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                when {
+                                    present -> {
+                                        Text("✓ ${selModel.label} ready", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
+                                        TextButton(onClick = { LlamaModelManager.delete(this@MainActivity, selModel); present = false }) {
+                                            Text("Delete model · free ${selModel.sizeMb} MB", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                                        }
+                                    }
+                                    dlPct >= 0 -> {
+                                        Text("Downloading… $dlPct%", fontSize = 13.sp)
+                                        LinearProgressIndicator({ dlPct / 100f }, Modifier.fillMaxWidth().padding(top = 4.dp))
+                                    }
+                                    else -> Button(onClick = {
+                                        dlPct = 0
+                                        scope.launch {
+                                            val ok = LlamaModelManager.download(this@MainActivity, selModel) { dlPct = it }
+                                            present = ok; dlPct = -1
+                                        }
+                                    }) { Text("Download · ${selModel.sizeMb} MB") }
+                                }
+                                Spacer(Modifier.height(12.dp))
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Generate automatically")
+                                        Text(
+                                            "On = answer on each search · Off = tap ✨ Answer",
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp
+                                        )
+                                    }
+                                    Switch(checked = ragAuto, onCheckedChange = { ragAuto = it; settings.ragAuto = it })
+                                }
+                                Spacer(Modifier.height(12.dp))
+                                var topN by remember { mutableStateOf(settings.ragTopN.toFloat()) }
+                                Text("Context: top ${topN.toInt()} smarans")
+                                Slider(
+                                    value = topN,
+                                    onValueChange = { topN = it; settings.ragTopN = it.toInt() },
+                                    valueRange = 1f..5f, steps = 3
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                var ctxText by remember { mutableStateOf(settings.ragCtx.toString()) }
+                                OutlinedTextField(
+                                    value = ctxText,
+                                    onValueChange = { v ->
+                                        val digits = v.filter { it.isDigit() }.take(5)
+                                        ctxText = digits
+                                        digits.toIntOrNull()?.let { settings.ragCtx = it }
+                                    },
+                                    label = { Text("Context window (tokens)") },
+                                    supportingText = { Text("Clamped to 1024–8192 and the model's own limit. Higher = richer context, more RAM.") },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                var prompt by remember { mutableStateOf(settings.ragPrompt) }
+                                OutlinedTextField(
+                                    value = prompt, onValueChange = { prompt = it; settings.ragPrompt = it },
+                                    label = { Text("Instruction") },
+                                    modifier = Modifier.fillMaxWidth(), minLines = 2
                                 )
                             }
 
