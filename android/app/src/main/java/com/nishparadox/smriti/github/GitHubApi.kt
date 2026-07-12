@@ -29,9 +29,11 @@ object GitHubApi {
     }
 
     /** Repos the token can access (most-recently-updated first, first 100). */
-    suspend fun listRepos(token: String): List<Repo> = withContext(Dispatchers.IO) {
+    suspend fun listRepos(token: String, page: Int = 1): List<Repo> = withContext(Dispatchers.IO) {
         runCatching {
-            val body = get("$API/user/repos?per_page=100&sort=updated", token) ?: return@withContext emptyList()
+            // affiliation=owner → the user's OWN repos first (no org/collab noise); page = "load more".
+            val body = get("$API/user/repos?affiliation=owner&per_page=100&sort=updated&page=$page", token)
+                ?: return@withContext emptyList()
             val arr = JSONArray(body)
             (0 until arr.length()).map {
                 val o = arr.getJSONObject(it)
@@ -50,7 +52,7 @@ object GitHubApi {
             runCatching {
                 val q = query + repos.joinToString("") { " repo:$it" }
                 val url = "$API/search/code?per_page=30&q=" + URLEncoder.encode(q, "UTF-8")
-                val body = get(url, token, textMatch = true) ?: return@withContext emptyList()
+                val body = get(url, token, "application/vnd.github.text-match+json") ?: return@withContext emptyList()
                 val items = JSONObject(body).optJSONArray("items") ?: return@withContext emptyList()
                 (0 until items.length()).map {
                     val o = items.getJSONObject(it)
@@ -61,6 +63,8 @@ object GitHubApi {
                         title = path,
                         snippet = firstFragment(o) ?: path,
                         url = o.optString("html_url"),
+                        repoFullName = repo,
+                        path = path,
                     )
                 }
             }.getOrElse { Log.w(TAG, "gh searchCode failed", it); emptyList() }
@@ -75,13 +79,21 @@ object GitHubApi {
         return null
     }
 
-    private fun get(url: String, token: String, textMatch: Boolean = false): String? {
+    /** File content (token-authed, so private repos work) — raw bytes as text. Null on failure. */
+    suspend fun fetchFile(token: String, repoFullName: String, path: String): String? =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val encPath = path.split("/").joinToString("/") {
+                    URLEncoder.encode(it, "UTF-8").replace("+", "%20")
+                }
+                get("$API/repos/$repoFullName/contents/$encPath", token, "application/vnd.github.raw")
+            }.getOrElse { Log.w(TAG, "gh fetchFile failed", it); null }
+        }
+
+    private fun get(url: String, token: String, accept: String = "application/vnd.github+json"): String? {
         val c = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
-            setRequestProperty(
-                "Accept",
-                if (textMatch) "application/vnd.github.text-match+json" else "application/vnd.github+json",
-            )
+            setRequestProperty("Accept", accept)
             setRequestProperty("Authorization", "Bearer $token")
             setRequestProperty("User-Agent", "smriti-android")
             setRequestProperty("X-GitHub-Api-Version", "2022-11-28")

@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -195,6 +196,7 @@ class MainActivity : ComponentActivity() {
                 var toMonth by remember { mutableStateOf<YearMonth?>(YearMonth.now()) }   // "To" defaults to current month
                 var externalHits by remember { mutableStateOf<List<ExternalHit>?>(null) }
                 var externalLoading by remember { mutableStateOf(false) }
+                var externalDetail by remember { mutableStateOf<ExternalHit?>(null) }
                 LaunchedEffect(query) { externalHits = null; externalLoading = false }   // reset on new query
                 var datePickerFor by remember { mutableStateOf<String?>(null) }   // "from" | "to" | null
                 var audioEnabled by remember { mutableStateOf(settings.audioTranscription) }
@@ -318,7 +320,7 @@ class MainActivity : ComponentActivity() {
                             Spacer(Modifier.height(16.dp))
                             HorizontalDivider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f))
 
-                            if (SnipStore.snips.isEmpty()) {
+                            if (SnipStore.snips.isEmpty() && !ghSource.isEnabled) {
                                 Column(
                                     Modifier.weight(1f).fillMaxWidth(),
                                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -445,7 +447,7 @@ class MainActivity : ComponentActivity() {
                                     val byId = SnipStore.snips.associateBy { it.id }
                                     rankedIds.mapNotNull { byId[it] }.filter(passesFilters)  // best match first
                                 }
-                                if (filtered.isEmpty()) {
+                                if (filtered.isEmpty() && query.isNotBlank()) {
                                     Text(
                                         "No matches",
                                         color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
@@ -530,11 +532,7 @@ class MainActivity : ComponentActivity() {
                                                 )
                                             }
                                             else -> items(hits) { hit ->
-                                                ExternalHitRow(hit, onOpen = {
-                                                    runCatching {
-                                                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(hit.url)))
-                                                    }
-                                                })
+                                                ExternalHitRow(hit, onOpen = { externalDetail = hit })
                                             }
                                         }
                                     }
@@ -547,6 +545,9 @@ class MainActivity : ComponentActivity() {
                                 onDismiss = { detailSnip = null },
                                 onDelete = { deleteWithUndo(s); detailSnip = null }
                             )
+                        }
+                        externalDetail?.let { h ->
+                            ExternalHitDialog(hit = h, token = ghConn.token, onDismiss = { externalDetail = null })
                         }
                     } else {
                         Column(
@@ -742,10 +743,9 @@ class MainActivity : ComponentActivity() {
                             var showGhDialog by remember { mutableStateOf(false) }
                             if (ghConnected) {
                                 Text("Connected as ${ghConn.account} ✓", color = MaterialTheme.colorScheme.primary)
-                                Text(
-                                    "Searching ${ghConn.repos.size} repo(s)",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp
-                                )
+                                ghConn.repos.forEach { repo ->
+                                    Text("• $repo", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                                }
                                 Spacer(Modifier.height(6.dp))
                                 Row {
                                     OutlinedButton(
@@ -1136,11 +1136,16 @@ private fun GitHubConnectDialog(conn: GitHubConnection, onDone: () -> Unit, onDi
     var error by remember { mutableStateOf<String?>(null) }
     var account by remember { mutableStateOf(conn.account) }
     var repos by remember { mutableStateOf<List<GitHubApi.Repo>>(emptyList()) }
+    var page by remember { mutableStateOf(1) }
+    var hasMore by remember { mutableStateOf(false) }
+    var loadingMore by remember { mutableStateOf(false) }
     val selected = remember { mutableStateListOf<String>().apply { addAll(conn.repos) } }
 
     // Edit mode (already connected): pre-fetch the repo list so the checklist shows.
     LaunchedEffect(Unit) {
-        if (account != null && token.isNotBlank() && repos.isEmpty()) repos = GitHubApi.listRepos(token.trim())
+        if (account != null && token.isNotBlank() && repos.isEmpty()) {
+            repos = GitHubApi.listRepos(token.trim(), 1); hasMore = repos.size == 100
+        }
     }
 
     Dialog(onDismissRequest = onDismiss) {
@@ -1169,15 +1174,27 @@ private fun GitHubConnectDialog(conn: GitHubConnection, onDone: () -> Unit, onDi
                             scope.launch {
                                 val login = GitHubApi.verify(token.trim())
                                 if (login == null) { error = "Invalid token, or no access"; busy = false }
-                                else { account = login; repos = GitHubApi.listRepos(token.trim()); busy = false }
+                                else {
+                                    account = login
+                                    repos = GitHubApi.listRepos(token.trim(), 1); hasMore = repos.size == 100
+                                    busy = false
+                                }
                             }
                         }
                     ) { Text(if (busy) "Verifying…" else "Verify") }
                 } else {
                     Spacer(Modifier.height(10.dp))
                     Text("Connected as $account — pick repos to search:", fontSize = 13.sp)
+                    var repoFilter by remember { mutableStateOf("") }
+                    OutlinedTextField(
+                        value = repoFilter, onValueChange = { repoFilter = it },
+                        label = { Text("Filter (e.g. logseq)") }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
+                    )
+                    // Your OWN repos first (affiliation=owner → no org/collab noise); "Load more" pages.
+                    val shown = repos.filter { it.fullName.contains(repoFilter, ignoreCase = true) }
                     LazyColumn(Modifier.heightIn(max = 260.dp)) {
-                        items(repos) { r ->
+                        items(shown) { r ->
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.fillMaxWidth().clickable {
@@ -1193,6 +1210,21 @@ private fun GitHubConnectDialog(conn: GitHubConnection, onDone: () -> Unit, onDi
                                 Text(r.fullName + if (r.private) "  🔒" else "", fontSize = 13.sp)
                             }
                         }
+                        if (hasMore) {
+                            item {
+                                TextButton(
+                                    enabled = !loadingMore,
+                                    onClick = {
+                                        loadingMore = true
+                                        scope.launch {
+                                            val next = GitHubApi.listRepos(token.trim(), page + 1)
+                                            repos = repos + next; page += 1
+                                            hasMore = next.size == 100; loadingMore = false
+                                        }
+                                    }
+                                ) { Text(if (loadingMore) "Loading…" else "Load more…") }
+                            }
+                        }
                     }
                     Spacer(Modifier.height(8.dp))
                     Button(
@@ -1204,6 +1236,42 @@ private fun GitHubConnectDialog(conn: GitHubConnection, onDone: () -> Unit, onDi
                 }
                 Spacer(Modifier.height(8.dp))
                 TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        }
+    }
+}
+
+/** Read-only in-app view of an external hit's file, fetched token-authed (so private repos work). */
+@Composable
+private fun ExternalHitDialog(hit: ExternalHit, token: String?, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    var content by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(true) }
+    LaunchedEffect(hit) {
+        content = if (token == null) null else GitHubApi.fetchFile(token, hit.repoFullName, hit.path)
+        loading = false
+    }
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(shape = MaterialTheme.shapes.large, tonalElevation = 4.dp) {
+            Column(Modifier.padding(20.dp).width(340.dp)) {
+                Text(hit.title, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("🌐 ${hit.sourceLabel} · read-only", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
+                Spacer(Modifier.height(10.dp))
+                Box(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
+                    when {
+                        loading -> Text("Loading…", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                        content == null -> Text("Couldn't load content.", color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+                        else -> SelectionContainer { Text(content!!, fontSize = 13.sp, lineHeight = 19.sp) }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = {
+                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(hit.url))) }
+                    }) { Text("Open in browser") }
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = onDismiss) { Text("Close") }
+                }
             }
         }
     }

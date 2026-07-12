@@ -20,7 +20,9 @@ interface ExternalSource {
  */
 data class ExternalHit(
     val sourceLabel: String,
-    val title: String,     // e.g. the file path / page name
-    val snippet: String,   // matching text fragment
-    val url: String,       // opens in the browser (the source page)
+    val title: String,        // e.g. the file path / page name
+    val snippet: String,      // matching text fragment
+    val url: String,          // browser fallback (the source page)
+    val repoFullName: String, // owner/repo — to fetch the file via the Contents API (token-authed)
+    val path: String,         // file path within the repo
 )
