@@ -58,7 +58,8 @@ thing — one syncs your data, one is a read-only search source):
 4. **Confirm** — store token + selected repo list.
 
 **Token security (non-negotiable):**
-- Stored in **`EncryptedSharedPreferences`** (not plain prefs), never logged.
+- Encrypted with an **Android Keystore AES/GCM key** (Jetpack Security's `EncryptedSharedPreferences`
+  is deprecated, so we use the Keystore directly — no dependency), never logged.
 - **Never** written to `smarans.jsonl` or synced to Drive — it stays device-local.
 - "Disconnect" clears the token + repo selection.
 
