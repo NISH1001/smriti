@@ -13,8 +13,8 @@ android {
         applicationId = "com.nishparadox.smriti"
         minSdk = 34
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.6.0"
+        versionCode = 9
+        versionName = "0.7.0"
         ndk { abiFilters.add("arm64-v8a") }
         externalNativeBuild {
             cmake { arguments += listOf("-DGGML_OPENMP=OFF") }
