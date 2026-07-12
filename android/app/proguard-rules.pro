@@ -4,6 +4,7 @@
     native <methods>;
 }
 -keep class com.nishparadox.smriti.transcribe.WhisperNative { *; }
+-keep class com.nishparadox.smriti.rag.LlamaNative { *; }
 
 # org.json is part of the platform; nothing to keep. Compose / AndroidX / kotlinx ship their
 # own consumer rules, so no extra keeps are needed for them.

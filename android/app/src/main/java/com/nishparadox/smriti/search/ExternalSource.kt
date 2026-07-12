@@ -12,6 +12,13 @@ interface ExternalSource {
     val isEnabled: Boolean
     /** Ranked-by-the-source hits for the query; empty on no match or failure. Runs on demand. */
     suspend fun search(query: String): List<ExternalHit>
+
+    /**
+     * Full note body for [hit], cleaned by this source's own preprocessor into prose suitable for
+     * RAG context (frontmatter/metadata stripped). null on failure. The token-level fit to the
+     * model's context window happens later, natively — this returns the whole cleaned note.
+     */
+    suspend fun content(hit: ExternalHit): String?
 }
 
 /**

@@ -46,6 +46,36 @@ class Settings(ctx: Context) {
         get() = p.getStringSet("listFields", DEFAULT_LIST_FIELDS)!!
         set(v) { p.edit().putStringSet("listFields", v).apply() }
 
+    /** RAG (on-device answer synthesis) is opt-in; enabling downloads the selected small LLM. */
+    var ragEnabled: Boolean
+        get() = p.getBoolean("ragEnabled", false)
+        set(v) { p.edit().putBoolean("ragEnabled", v).apply() }
+
+    /** Selected RAG model id (see rag/RagModel). */
+    var ragModel: String
+        get() = p.getString("ragModel", DEFAULT_RAG_MODEL)!!
+        set(v) { p.edit().putString("ragModel", v).apply() }
+
+    /** Editable grounding instruction, sent as the system prompt. */
+    var ragPrompt: String
+        get() = p.getString("ragPrompt", DEFAULT_RAG_PROMPT)!!
+        set(v) { p.edit().putString("ragPrompt", v).apply() }
+
+    /** How many top-ranked smarans to feed the model as context. */
+    var ragTopN: Int
+        get() = p.getInt("ragTopN", 3)
+        set(v) { p.edit().putInt("ragTopN", v).apply() }
+
+    /** Auto = generate on each search; false (default) = only when the ✨ Answer button is tapped. */
+    var ragAuto: Boolean
+        get() = p.getBoolean("ragAuto", false)
+        set(v) { p.edit().putBoolean("ragAuto", v).apply() }
+
+    /** Context-window CAP in tokens (memory knob). Effective window = min(model-trained, this). */
+    var ragCtx: Int
+        get() = p.getInt("ragCtx", 4096)
+        set(v) { p.edit().putInt("ragCtx", v).apply() }
+
     companion object {
         /** Row-field keys, in display order. */
         val LIST_FIELDS = listOf(
@@ -56,5 +86,11 @@ class Settings(ctx: Context) {
             "url" to "URL",
         )
         val DEFAULT_LIST_FIELDS = LIST_FIELDS.map { it.first }.toSet()
+
+        const val DEFAULT_RAG_MODEL = "lfm2.5-350m"
+        const val DEFAULT_RAG_PROMPT =
+            "You are a helpful assistant answering from the user's personal notes. Using the notes " +
+                "provided, answer the question clearly and completely in your own words. If the notes " +
+                "don't contain the answer, say it's not in the notes."
     }
 }
