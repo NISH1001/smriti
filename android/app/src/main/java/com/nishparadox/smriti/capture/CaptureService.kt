@@ -19,6 +19,7 @@ import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.nishparadox.smriti.MainActivity
 import com.nishparadox.smriti.StopReceiver
+import com.nishparadox.smriti.media.NowPlaying
 import com.nishparadox.smriti.notes.DeviceId
 import com.nishparadox.smriti.notes.DriveSync
 import com.nishparadox.smriti.notes.SmaranType
@@ -177,9 +178,12 @@ class CaptureService : Service(), SnipEntryPoint {
             sc.noteId = id
             snipStartMs = id
             snipRef.set(sc)
-            SnipStore.add(Snip(id = id, createdAt = id, status = SnipStatus.RECORDING, type = SmaranType.AUDIO, source = sourceLabel, durationS = total, device = deviceId))
+            // What's playing right now is what's in the retrospective ring buffer — query at
+            // trigger time, not at finalize (playback may have stopped by then).
+            val nowPlaying = NowPlaying.tags(this, Settings(this).whitelist)
+            SnipStore.add(Snip(id = id, createdAt = id, status = SnipStatus.RECORDING, type = SmaranType.AUDIO, source = sourceLabel, durationS = total, device = deviceId, metadata = nowPlaying))
             notifySnip(true)
-            Log.i(TAG, "snip started preRoll=$preRoll total=$total")
+            Log.i(TAG, "snip started preRoll=$preRoll total=$total nowPlaying='${nowPlaying["title"] ?: ""}'")
         } else if (snipRef.compareAndSet(s, null)) {
             notifySnip(false)
             if (System.currentTimeMillis() - snipStartMs < 2000L) {   // tapped stop right away -> cancel

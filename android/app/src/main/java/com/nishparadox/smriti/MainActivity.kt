@@ -77,6 +77,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -100,6 +101,7 @@ import androidx.core.graphics.drawable.toBitmap
 import androidx.documentfile.provider.DocumentFile
 import com.nishparadox.smriti.apps.AppWhitelist
 import com.nishparadox.smriti.capture.CaptureService
+import com.nishparadox.smriti.media.NowPlaying
 import com.nishparadox.smriti.notes.DeviceId
 import com.nishparadox.smriti.notes.DriveSync
 import com.nishparadox.smriti.notes.SmaranType
@@ -138,6 +140,10 @@ class MainActivity : ComponentActivity() {
         super.onTrimMemory(level)
         if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) RagGenerator.unload()
     }
+
+    /** Bumped on every resume so grants toggled in system Settings (notification access) re-read. */
+    private val resumeTick = mutableIntStateOf(0)
+    override fun onResume() { super.onResume(); resumeTick.intValue++ }
 
     @OptIn(ExperimentalLayoutApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -283,6 +289,7 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(query) { externalHits = null; externalLoading = false }   // reset on new query
                 var datePickerFor by remember { mutableStateOf<String?>(null) }   // "from" | "to" | null
                 var audioEnabled by remember { mutableStateOf(settings.audioTranscription) }
+                val nowPlayingGranted = remember(resumeTick.intValue) { NowPlaying.hasAccess(this@MainActivity) }
                 var modelPct by remember { mutableStateOf<Int?>(null) }   // non-null = downloading %
                 var modelReady by remember { mutableStateOf(ModelManager.isPresent(this@MainActivity)) }
                 var showNewNote by remember { mutableStateOf(false) }
@@ -811,6 +818,20 @@ class MainActivity : ComponentActivity() {
                                     }
                                     Spacer(Modifier.height(8.dp))
                                     OutlinedButton(onClick = { showPicker = true }) { Text("＋  Choose apps") }
+                                    Spacer(Modifier.height(16.dp))
+                                    Text("Book / track tagging", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                                    Text(
+                                        "Tag each snip with what was playing (book, chapter, author) so you can search by title. Needs Notification access — Smriti never reads notifications; it's just how Android exposes now-playing info.",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    if (nowPlayingGranted) {
+                                        Text("Notification access granted ✓", color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
+                                    } else {
+                                        OutlinedButton(onClick = {
+                                            startActivity(Intent(AndroidSettings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                                        }) { Text("Grant notification access") }
+                                    }
                                     Spacer(Modifier.height(8.dp))
                                     TextButton(onClick = {
                                         ModelManager.delete(this@MainActivity)
