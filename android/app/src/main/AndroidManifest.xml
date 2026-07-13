@@ -60,6 +60,17 @@
             android:name=".trigger.FloatingBubbleService"
             android:exported="false" />
 
+        <!-- Stub listener: never reads notifications. Granting it Notification access is what
+             lets MediaSessionManager expose the now-playing title/album/artist for audio snips. -->
+        <service
+            android:name=".media.NowPlayingListener"
+            android:exported="false"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <receiver android:name=".StopReceiver" android:exported="false" />
 
     </application>

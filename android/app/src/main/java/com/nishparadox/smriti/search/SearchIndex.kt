@@ -54,7 +54,8 @@ object SearchIndex {
                     .setListFilterQueryLanguageEnabled(true)  // enables the `term*` prefix operator
                     .setPropertyWeights(
                         TYPE,
-                        mapOf("title" to 3.0, "text" to 1.0, "source" to 2.0, "url" to 1.0),
+                        // album often holds the *book* name for audio snips (title = chapter/track)
+                        mapOf("title" to 3.0, "album" to 3.0, "artist" to 2.0, "text" to 1.0, "source" to 2.0, "url" to 1.0),
                     )
                     .setResultCountPerPage(100)
                     .build()
@@ -72,6 +73,8 @@ object SearchIndex {
         val schema = AppSearchSchema.Builder(TYPE)
             .addProperty(stringProp("text"))
             .addProperty(stringProp("title"))
+            .addProperty(stringProp("album"))
+            .addProperty(stringProp("artist"))
             .addProperty(stringProp("source"))
             .addProperty(stringProp("url"))
             .build()
@@ -96,6 +99,8 @@ object SearchIndex {
             GenericDocument.Builder<GenericDocument.Builder<*>>(NAMESPACE, sn.id.toString(), TYPE)
                 .setPropertyString("text", sn.text)
                 .setPropertyString("title", sn.metadata["title"] ?: "")
+                .setPropertyString("album", sn.metadata["album"] ?: "")
+                .setPropertyString("artist", sn.metadata["artist"] ?: "")
                 .setPropertyString("source", sn.source)
                 .setPropertyString("url", sn.metadata["url"] ?: "")
                 .build()
