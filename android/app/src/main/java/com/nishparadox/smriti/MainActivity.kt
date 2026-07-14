@@ -12,11 +12,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,10 +29,12 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -50,8 +56,11 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
@@ -59,6 +68,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Switch
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -68,11 +79,8 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -88,12 +96,17 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -129,6 +142,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -145,7 +159,7 @@ class MainActivity : ComponentActivity() {
     private val resumeTick = mutableIntStateOf(0)
     override fun onResume() { super.onResume(); resumeTick.intValue++ }
 
-    @OptIn(ExperimentalLayoutApi::class)
+    @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val settings = Settings(this)
@@ -215,6 +229,12 @@ class MainActivity : ComponentActivity() {
                 var detailSnip by remember { mutableStateOf<Snip?>(null) }
                 var query by remember { mutableStateOf("") }
                 var typeFilter by remember { mutableStateOf<SmaranType?>(null) }
+                // Advanced filters (behind the tune icon): free-text substring match, backed by
+                // typeahead over the distinct values actually present. Empty = not filtering.
+                var titleQuery by remember { mutableStateOf("") }
+                var authorQuery by remember { mutableStateOf("") }
+                var sourceQuery by remember { mutableStateOf("") }
+                var showFilters by remember { mutableStateOf(false) }
                 var fromMonth by remember { mutableStateOf<YearMonth?>(null) }
                 var toMonth by remember { mutableStateOf<YearMonth?>(YearMonth.now()) }   // "To" defaults to current month
                 var externalHits by remember { mutableStateOf<List<ExternalHit>?>(null) }
@@ -450,59 +470,97 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                 } else {
+                                    val monthFmt = remember { DateTimeFormatter.ofPattern("MMM yyyy") }
+                                    val nowMonth = remember { YearMonth.now() }
+                                    // "Filters" = everything behind the tune icon — NOT the text query,
+                                    // which lives on the front bar. Drives the badge dot.
+                                    val filtersActive = typeFilter != null || titleQuery.isNotBlank() ||
+                                        authorQuery.isNotBlank() || sourceQuery.isNotBlank() ||
+                                        fromMonth != null || toMonth != nowMonth
                                     OutlinedTextField(
                                         value = query,
                                         onValueChange = { query = it },
                                         modifier = Modifier.fillMaxWidth(),
                                         placeholder = { Text("Search smaran") },
                                         leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                                        trailingIcon = {
+                                            BadgedBox(badge = { if (filtersActive) Badge() }) {
+                                                IconButton(onClick = { showFilters = true }) {
+                                                    Icon(TuneIcon, contentDescription = "Advanced filters")
+                                                }
+                                            }
+                                        },
                                         singleLine = true,
                                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                                         keyboardActions = KeyboardActions(onSearch = { if (ragAuto && ragEnabled) answerNow() }),
                                     )
-                                    Spacer(Modifier.height(8.dp))
-                                    Row(
-                                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        FilterChip(
-                                            selected = typeFilter == null,
-                                            onClick = { typeFilter = null },
-                                            label = { Text("All") }
-                                        )
-                                        listOf(SmaranType.AUDIO, SmaranType.WEB, SmaranType.TEXT, SmaranType.NOTE).forEach { t ->
-                                            FilterChip(
-                                                selected = typeFilter == t,
-                                                onClick = { typeFilter = if (typeFilter == t) null else t },
-                                                label = { Text(t.name.lowercase().replaceFirstChar { it.uppercase() }) }
-                                            )
+                                    if (showFilters) {
+                                        // Typeahead sources: distinct values actually present (recompute on store change).
+                                        val titleSuggestions = remember(SnipStore.version) {
+                                            SnipStore.snips.mapNotNull(::titleOf).distinct()
                                         }
-                                    }
-                                    Spacer(Modifier.height(8.dp))
-                                    val monthFmt = remember { DateTimeFormatter.ofPattern("MMM yyyy") }
-                                    val nowMonth = remember { YearMonth.now() }
-                                    val anyActive = query.isNotBlank() || typeFilter != null ||
-                                        fromMonth != null || toMonth != nowMonth
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        FilterChip(
-                                            selected = fromMonth != null,
-                                            onClick = { datePickerFor = "from" },
-                                            label = { Text(fromMonth?.format(monthFmt) ?: "From") }
-                                        )
-                                        Text("→", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        FilterChip(
-                                            selected = true,
-                                            onClick = { datePickerFor = "to" },
-                                            label = { Text(toMonth?.format(monthFmt) ?: "To") }
-                                        )
-                                        if (anyActive) {
-                                            IconButton(onClick = {
-                                                query = ""; typeFilter = null; fromMonth = null; toMonth = nowMonth
-                                            }) {
-                                                Icon(Icons.Filled.Close, contentDescription = "Clear filters")
+                                        val authorSuggestions = remember(SnipStore.version) {
+                                            SnipStore.snips.mapNotNull { it.metadata["artist"]?.ifBlank { null } }.distinct()
+                                        }
+                                        val sourceSuggestions = remember(SnipStore.version) {
+                                            SnipStore.snips.mapNotNull { it.source.ifBlank { null } }.distinct()
+                                        }
+                                        ModalBottomSheet(onDismissRequest = { showFilters = false }) {
+                                            Column(
+                                                Modifier.fillMaxWidth()
+                                                    .padding(horizontal = 20.dp).padding(bottom = 24.dp)
+                                            ) {
+                                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                                    Text("Filters", fontSize = 18.sp, modifier = Modifier.weight(1f))
+                                                    if (filtersActive) {
+                                                        TextButton(onClick = {
+                                                            typeFilter = null; titleQuery = ""; authorQuery = ""
+                                                            sourceQuery = ""; fromMonth = null; toMonth = nowMonth
+                                                        }) { Text("Clear all") }
+                                                    }
+                                                }
+                                                Spacer(Modifier.height(8.dp))
+                                                Text("Type", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                                                Spacer(Modifier.height(4.dp))
+                                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                    FilterChip(
+                                                        selected = typeFilter == null,
+                                                        onClick = { typeFilter = null },
+                                                        label = { Text("All") }
+                                                    )
+                                                    listOf(SmaranType.AUDIO, SmaranType.WEB, SmaranType.TEXT, SmaranType.NOTE).forEach { t ->
+                                                        FilterChip(
+                                                            selected = typeFilter == t,
+                                                            onClick = { typeFilter = if (typeFilter == t) null else t },
+                                                            label = { Text(t.name.lowercase().replaceFirstChar { it.uppercase() }) }
+                                                        )
+                                                    }
+                                                }
+                                                Spacer(Modifier.height(16.dp))
+                                                FilterField("Title / book", titleQuery, { titleQuery = it }, titleSuggestions)
+                                                Spacer(Modifier.height(12.dp))
+                                                FilterField("Author", authorQuery, { authorQuery = it }, authorSuggestions)
+                                                Spacer(Modifier.height(12.dp))
+                                                FilterField("Source / app", sourceQuery, { sourceQuery = it }, sourceSuggestions)
+                                                Spacer(Modifier.height(16.dp))
+                                                Text("Date", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                                                Spacer(Modifier.height(4.dp))
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    FilterChip(
+                                                        selected = fromMonth != null,
+                                                        onClick = { datePickerFor = "from" },
+                                                        label = { Text(fromMonth?.format(monthFmt) ?: "From") }
+                                                    )
+                                                    Text("→", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    FilterChip(
+                                                        selected = toMonth != nowMonth,
+                                                        onClick = { datePickerFor = "to" },
+                                                        label = { Text(toMonth?.format(monthFmt) ?: "To") }
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -520,12 +578,17 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                                 Spacer(Modifier.height(10.dp))
-                                // Type + month-range predicate, applied after text ranking.
+                                // Type + title/author/source + month-range predicate, applied after
+                                // text ranking. Title matches book/chapter or album; source matches the
+                                // display label (app name / domain). All substring, case-insensitive.
                                 val passesFilters: (Snip) -> Boolean = { s ->
                                     val ym = YearMonth.from(Instant.ofEpochMilli(s.createdAt).atZone(ZoneId.systemDefault()))
                                     (fromMonth == null || ym >= fromMonth) &&
                                         (toMonth == null || ym <= toMonth) &&
-                                        (typeFilter == null || s.type == typeFilter)
+                                        (typeFilter == null || s.type == typeFilter) &&
+                                        (titleQuery.isBlank() || titleOf(s)?.contains(titleQuery, ignoreCase = true) == true) &&
+                                        (authorQuery.isBlank() || s.metadata["artist"]?.contains(authorQuery, ignoreCase = true) == true) &&
+                                        (sourceQuery.isBlank() || s.source.contains(sourceQuery, ignoreCase = true))
                                 }
                                 // BM25F ranking via AppSearch (async). null = no searchable query →
                                 // keep newest-first. Re-runs on a query change or store change (version).
@@ -591,30 +654,13 @@ class MainActivity : ComponentActivity() {
                                     }
                                     items(filtered, key = { it.id }) { snip ->
                                         val selectionMode = selectedIds.isNotEmpty()
-                                        val dismiss = rememberSwipeToDismissBoxState(
-                                            positionalThreshold = { it * 0.5f },   // friction: past halfway
-                                            confirmValueChange = { v ->
-                                                if (v != SwipeToDismissBoxValue.Settled) {   // either direction
-                                                    deleteWithUndo(snip); true
-                                                } else false
-                                            }
-                                        )
-                                        SwipeToDismissBox(
-                                            state = dismiss,
-                                            enableDismissFromStartToEnd = !selectionMode,
-                                            enableDismissFromEndToStart = !selectionMode,
-                                            backgroundContent = {
-                                                Row(
-                                                    Modifier.fillMaxSize()
-                                                        .background(MaterialTheme.colorScheme.errorContainer)
-                                                        .padding(horizontal = 24.dp),
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Icon(Icons.Filled.Delete, "Delete", tint = MaterialTheme.colorScheme.onErrorContainer)
-                                                    Icon(Icons.Filled.Delete, "Delete", tint = MaterialTheme.colorScheme.onErrorContainer)
-                                                }
-                                            }
+                                        // Swipe LEFT → Delete, swipe RIGHT → Share; each reveals a
+                                        // button you tap, so a stray scroll-nudge can't delete.
+                                        SwipeActionsRow(
+                                            enabled = !selectionMode,
+                                            canShare = snip.status == SnipStatus.DONE && snip.text.isNotBlank(),
+                                            onShare = { shareText(this@MainActivity, snip.text) },
+                                            onDelete = { deleteWithUndo(snip) },
                                         ) {
                                             SnipRow(
                                                 snip = snip,
@@ -1055,6 +1101,89 @@ private fun shareText(ctx: Context, text: String) {
     ctx.startActivity(Intent.createChooser(send, "Share snip").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }
 
+/**
+ * Swipe a row to reveal an action, which you then TAP: swipe LEFT → Delete (red, trailing edge),
+ * swipe RIGHT → Share (leading edge, only when [canShare]). Acting needs a deliberate tap, so a
+ * stray horizontal nudge during a fast vertical scroll can't delete a note (the old
+ * swipe-past-halfway gesture could). A horizontal [draggable] also leaves the LazyColumn's
+ * vertical scroll untouched. [enabled] false (selection mode) snaps it closed.
+ */
+@Composable
+private fun SwipeActionsRow(
+    enabled: Boolean,
+    canShare: Boolean,
+    onShare: () -> Unit,
+    onDelete: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val revealPx = with(LocalDensity.current) { 88.dp.toPx() }
+    val offset = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(enabled) { if (!enabled) offset.animateTo(0f) }   // selection mode → snap closed
+    // Drag range: left always opens delete; right opens share only when there's something to share.
+    val maxOffset = if (canShare) revealPx else 0f
+
+    Box(Modifier.fillMaxWidth()) {
+        // Action buttons behind the row: Share on the leading edge, Delete on the trailing edge.
+        // Each is hidden under the opaque row until you slide toward it, and tappable only once open.
+        Box(Modifier.matchParentSize()) {
+            if (canShare) {
+                Box(
+                    Modifier.align(Alignment.CenterStart).fillMaxHeight().width(88.dp)
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    IconButton(
+                        onClick = { scope.launch { offset.animateTo(0f) }; onShare() },
+                        enabled = offset.value >= revealPx / 2,
+                    ) {
+                        Icon(Icons.Filled.Share, contentDescription = "Share", tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                    }
+                }
+            }
+            Box(
+                Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(88.dp)
+                    .background(MaterialTheme.colorScheme.errorContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                IconButton(
+                    onClick = { scope.launch { offset.animateTo(0f) }; onDelete() },
+                    enabled = offset.value <= -revealPx / 2,
+                ) {
+                    Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.onErrorContainer)
+                }
+            }
+        }
+        // The row itself, sliding over the buttons. Opaque so only the edge you swipe toward shows.
+        Box(
+            Modifier
+                .offset { IntOffset(offset.value.roundToInt(), 0) }
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.background)
+                .then(
+                    if (enabled) Modifier.draggable(
+                        orientation = Orientation.Horizontal,
+                        state = rememberDraggableState { delta ->
+                            scope.launch { offset.snapTo((offset.value + delta).coerceIn(-revealPx, maxOffset)) }
+                        },
+                        // Settle open past 40% of the button width, else snap shut.
+                        onDragStopped = {
+                            scope.launch {
+                                offset.animateTo(
+                                    when {
+                                        offset.value <= -revealPx * 0.4f -> -revealPx
+                                        canShare && offset.value >= revealPx * 0.4f -> revealPx
+                                        else -> 0f
+                                    }
+                                )
+                            }
+                        },
+                    ) else Modifier
+                )
+        ) { content() }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SnipRow(
@@ -1066,7 +1195,6 @@ private fun SnipRow(
     onLongPress: () -> Unit,
     fields: Set<String>,
 ) {
-    val ctx = LocalContext.current
     val badge: String
     val preview: String
     when (snip.status) {
@@ -1114,11 +1242,7 @@ private fun SnipRow(
                 )
             }
         }
-        if (!selectionMode && snip.status == SnipStatus.DONE && snip.text.isNotBlank()) {
-            IconButton(onClick = { shareText(ctx, snip.text) }) {
-                Icon(Icons.Filled.Share, contentDescription = "Share")
-            }
-        }
+        // (Share moved to swipe-right; the note text now spans the full row width.)
     }
 }
 
@@ -1286,6 +1410,68 @@ private fun NewNoteDialog(onDismiss: () -> Unit, onSave: (String) -> Unit) {
                     TextButton(onClick = onDismiss) { Text("Cancel") }
                     Spacer(Modifier.width(4.dp))
                     Button(onClick = { onSave(text.trim()) }, enabled = text.isNotBlank()) { Text("Save") }
+                }
+            }
+        }
+    }
+}
+
+/** Grouping/display title of a smaran — audio: now-playing book/track (album as fallback);
+ *  web: page title. Null when there's nothing meaningful to filter on. */
+private fun titleOf(s: Snip): String? =
+    s.metadata["title"]?.takeIf { it.isNotBlank() }
+        ?: s.metadata["album"]?.takeIf { it.isNotBlank() }
+
+/** The Material "tune" (sliders) glyph, built from its path so we avoid the whole
+ *  material-icons-extended artifact (this app ships icons-core only). Icon() tints it. */
+private val TuneIcon: ImageVector by lazy {
+    ImageVector.Builder(
+        name = "Tune", defaultWidth = 24.dp, defaultHeight = 24.dp,
+        viewportWidth = 24f, viewportHeight = 24f,
+    ).addPath(
+        pathData = PathParser().parsePathString(
+            "M3,17v2h6v-2H3zM3,5v2h10V5H3zm10,16v-2h8v-2h-8v-2h-2v6h2zM7,9v2H3v2h4v2h2V9H7zm14,4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"
+        ).toNodes(),
+        fill = SolidColor(Color.Black),
+    ).build()
+}
+
+/** A free-text filter field with typeahead: as you type, chips of the matching distinct
+ *  [suggestions] appear below — tap one to fill it exactly. Substring match is applied by the
+ *  caller; picking a suggestion is just a convenience, partial text still filters. */
+@Composable
+private fun FilterField(
+    label: String,
+    value: String,
+    onValue: (String) -> Unit,
+    suggestions: List<String>,
+) {
+    Column {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValue,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(label) },
+            singleLine = true,
+            trailingIcon = if (value.isNotEmpty()) {
+                { IconButton(onClick = { onValue("") }) { Icon(Icons.Filled.Close, contentDescription = "Clear") } }
+            } else null,
+        )
+        val matches = remember(value, suggestions) {
+            if (value.isBlank()) emptyList()
+            else suggestions.filter { it.contains(value, ignoreCase = true) && !it.equals(value, ignoreCase = true) }.take(6)
+        }
+        if (matches.isNotEmpty()) {
+            Spacer(Modifier.height(4.dp))
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                matches.forEach { m ->
+                    SuggestionChip(
+                        onClick = { onValue(m) },
+                        label = { Text(m.take(30) + if (m.length > 30) "…" else "", maxLines = 1) }
+                    )
                 }
             }
         }
